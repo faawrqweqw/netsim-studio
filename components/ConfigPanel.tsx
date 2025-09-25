@@ -37,7 +37,7 @@ import IPsecConfig from './config/IPsecConfig';
 import HAConfig from './config/HAConfig';
 import GREVPNConfig from './config/GREVPNConfig';
 
-import { generateAllCliCommands } from '../../services/configService';
+import { generateAllCliCommands } from '../services/configService';
 import { SpinnerIcon } from './Icons';
 
 
