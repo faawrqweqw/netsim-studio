@@ -1,7 +1,7 @@
 
 
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
-import { Node, Connection, DeviceType, NodeConfig, Vendor } from '../../types';
+import { Node, Connection, DeviceType, NodeConfig, Vendor } from '../types';
 import { generateConfig } from '../../services/configService';
 import WirelessConfigModal from './WirelessConfigModal';
 import AdvancedWirelessConfigModal from './AdvancedWirelessConfigModal';
