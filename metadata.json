@@ -1,0 +1,6 @@
+{
+  "name": "NetSim Studio - 无user",
+  "description": "A web-based network topology and configuration platform. Users can drag and drop devices, connect them, configure parameters, and generate CLI commands or export the topology for educational and design purposes.",
+  "requestFramePermissions": [],
+  "prompt": ""
+}
