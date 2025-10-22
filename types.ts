@@ -9,6 +9,8 @@ export enum DeviceType {
   Firewall = 'Firewall',
   AP = 'Access Point',
   AC = 'Access Controller',
+  POE = 'POE Device',
+  Monitor = 'Monitor',
   Text = 'Text',
   Rectangle = 'Rectangle',
   Circle = 'Circle',

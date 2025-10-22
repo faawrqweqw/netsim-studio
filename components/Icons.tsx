@@ -714,6 +714,92 @@ export const ACIcon: React.FC<{ className?: string }> = ({ className }) => (
 	</symbol>
 </svg>
 );
+// 矢量图位置
+export const POEIcon: React.FC<{ className?: string }> = ({ className }) => (
+    <svg xmlns="http://www.w3.org/2000/svg" xmlnsXlink="http://www.w3.org/1999/xlink" viewBox="0 0 49 49" fill="#fff" fill-rule="evenodd" stroke="#000" stroke-linecap="round" stroke-linejoin="round">
+	<style>{`
+        .POEB{stroke-linejoin:miter}
+        .POEC{fill:#036c9b}
+        .POED{stroke-width:.787}
+        .POEE{stroke:#fff}
+        .POEF{stroke:none}
+        .POEG{stroke-linecap:square}
+    `}</style>
+	<use xlinkHref="#POEA" x=".5" y=".5" />
+	<symbol id="POEA" overflow="visible">
+		<g className="POEB POEC POED POEE">
+			<path d="M0 47.229V5.51h42.113v41.719H0z"/>
+			<path d="M47.623 42.113V0l-5.51 5.51v41.719l5.51-5.117zM7.478 0L0 5.117h42.113L47.623 0H7.478z"/>
+		</g>
+		<g className="POEF">
+			<path d="M42.113 5.51H0z" className="POEC"/>
+			<path d="M42.113 5.51v41.719z" className="POEC"/>
+		</g>
+		<path d="M42.113 5.51v41.719" fill="none" className="POEB POED POEE POEG"/>
+		<path d="M42.113 5.51H0z" className="POEC POEF"/>
+		<path d="M42.113 5.51H0" fill="none" className="POEB POED POEE POEG"/>
+		<path d="M42.113 5.51L47.623 0z" className="POEC POEF"/>
+		<path d="M42.113 5.51L47.623 0" fill="none" className="POEB POED POEE POEG"/>
+		{/* -- REDESIGNED POE SWITCH FRONT PANEL -- */}
+		<g transform="translate(8.5 16)">
+			{/* Status Light */}
+			<circle fill="#66bb6a" cx="4" cy="2" r="1.5"/>
+
+			{/* Port Grid */}
+			<g fill="#2d3748" stroke="#bbdefb" stroke-width="0.5">
+				<rect x="0" y="8" width="5" height="5" rx="1"/>
+				<rect x="7" y="8" width="5" height="5" rx="1"/>
+				<rect x="14" y="8" width="5" height="5" rx="1"/>
+				<rect x="21" y="8" width="5" height="5" rx="1"/>
+				<rect x="0" y="15" width="5" height="5" rx="1"/>
+				<rect x="7" y="15" width="5" height="5" rx="1"/>
+				<rect x="14" y="15" width="5" height="5" rx="1"/>
+				<rect x="21" y="15" width="5" height="5" rx="1"/>
+			</g>
+		</g>
+	</symbol>
+</svg>
+);
+
+export const MonitorIcon: React.FC<{ className?: string }> = ({ className }) => (
+    <svg xmlns="http://www.w3.org/2000/svg" xmlnsXlink="http://www.w3.org/1999/xlink" viewBox="0 0 49 49" fill="#fff" fill-rule="evenodd" stroke="#000" stroke-linecap="round" stroke-linejoin="round">
+	<style>{`
+        .MonB{stroke-linejoin:miter}
+        .MonC{fill:#036c9b}
+        .MonD{stroke-width:.787}
+        .MonE{stroke:#fff}
+        .MonF{stroke:none}
+        .MonG{stroke-linecap:square}
+    `}</style>
+	<use xlinkHref="#MonA" x=".5" y=".5"/>
+	<symbol id="MonA" overflow="visible">
+		<g className="MonB MonC MonD MonE">
+			<path d="M0 47.229V5.51h42.113v41.719H0z"/>
+			<path d="M47.623 42.113V0l-5.51 5.51v41.719l5.51-5.117zM7.478 0L0 5.117h42.113L47.623 0H7.478z"/>
+		</g>
+		<g className="MonF">
+			<path d="M42.113 5.51H0z" className="MonC"/>
+			<path d="M42.113 5.51v41.719z" className="MonC"/>
+		</g>
+		<path d="M42.113 5.51v41.719" fill="none" className="MonB MonD MonE MonG"/>
+		<path d="M42.113 5.51H0z" className="MonC MonF"/>
+		<path d="M42.113 5.51H0" fill="none" className="MonB MonD MonE MonG"/>
+		<path d="M42.113 5.51L47.623 0z" className="MonC MonF"/>
+		<path d="M42.113 5.51L47.623 0" fill="none" className="MonB MonD MonE MonG"/>
+		{/* -- REDESIGNED MONITOR ICON -- */}
+		<g transform="translate(10 12)">
+			{/* Screen */}
+			<rect x="2" y="2" width="22" height="15" rx="1.5" fill="#bbdefb"/>
+			{/* Screen Content */}
+			<rect x="4" y="4" width="18" height="11" rx="0.5" fill="#42a5f5"/>
+			{/* Stand */}
+			<path d="M 10 17 L 10 21 L 16 21 L 16 17 Z" fill="#bbdefb"/>
+			{/* Base */}
+			<rect x="7" y="21" width="12" height="2" rx="1" fill="#e3f2fd"/>
+		</g>
+	</symbol>
+</svg>
+);
 
 export const TextBoxSolidIcon: React.FC<{ className?: string }> = ({ className }) => (
   <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">

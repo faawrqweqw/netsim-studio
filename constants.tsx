@@ -11,6 +11,8 @@ import {
   FirewallIcon,
   APIcon,
   ACIcon,
+  POEIcon,
+  MonitorIcon,
   TextBoxSolidIcon,
   TextBoxNoneIcon,
   SolidLineIcon,
@@ -40,7 +42,9 @@ export const TOOLBAR_ITEMS = [
     items: [
       { name: 'PC', type: DeviceType.PC, icon: <PCIcon className="w-full h-full text-orange-400" />, color: 'border-orange-400' },
       { name: '服务器', type: DeviceType.Server, icon: <ServerIcon className="w-full h-full text-orange-400" />, color: 'border-orange-400' },
-      { name: '打印机', type: DeviceType.Print, icon: <PrintIcon className="w-full h-full text-orange-400" />,color: 'border-orange-400' }
+      { name: '打印机', type: DeviceType.Print, icon: <PrintIcon className="w-full h-full text-orange-400" />,color: 'border-orange-400' },
+      { name: 'POE设备', type: DeviceType.POE, icon: <POEIcon className="w-full h-full text-orange-400" />, color: 'border-orange-400' },
+      { name: '监控', type: DeviceType.Monitor, icon: <MonitorIcon className="w-full h-full text-orange-400" />, color: 'border-orange-400' }
     ]
   },
   {
@@ -523,6 +527,8 @@ const DEVICE_PORT_COUNTS: Partial<Record<DeviceType, number>> = {
   [DeviceType.Firewall]: 12,
   [DeviceType.AP]: 1,
   [DeviceType.AC]: 12,
+  [DeviceType.POE]: 1,
+  [DeviceType.Monitor]: 1,
   [DeviceType.Text]: 0,
   [DeviceType.Rectangle]: 0,
   [DeviceType.Circle]: 0,
@@ -551,7 +557,7 @@ const vendorPortNamer = (vendor: Vendor, type: DeviceType, i: number): string =>
   }
   
   // Existing logic for copper ports and other devices
-  const portNumber = (type === DeviceType.PC || type === DeviceType.Server) ? i : (i + 1);
+  const portNumber = (type === DeviceType.PC || type === DeviceType.Server || type === DeviceType.POE || type === DeviceType.Monitor) ? i : (i + 1);
   switch (vendor) {
     case Vendor.Huawei:
       if (type === DeviceType.L3Switch || type === DeviceType.L2Switch || type === DeviceType.AC) return `GigabitEthernet0/0/${portNumber}`;
@@ -562,7 +568,7 @@ const vendorPortNamer = (vendor: Vendor, type: DeviceType, i: number): string =>
     case Vendor.Cisco:
     default:
       if (type === DeviceType.L3Switch || type === DeviceType.L2Switch) return `GigabitEthernet0/${portNumber}`;
-      if (type === DeviceType.PC || type === DeviceType.Server) return `FastEthernet0/${portNumber}`;
+      if (type === DeviceType.PC || type === DeviceType.Server || type === DeviceType.POE || type === DeviceType.Monitor) return `FastEthernet0/${portNumber}`;
       return `GigabitEthernet0/${portNumber}`;
   }
 }

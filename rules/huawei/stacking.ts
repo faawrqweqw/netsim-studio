@@ -18,18 +18,42 @@ export const stackingRules = [
         }
     },
     {
-        pattern: "stack member-id (\\d+) renumber",
-        explanation: "将成员ID为 $1 的设备重新编号为 $2。执行后目标设备会重启以使新成员ID生效。",
+        pattern: "stack member (\\d+) renumber (\\d+)",
+        explanation: "（简写语法，不推荐）将成员ID为 $1 的设备重新编号为 $2。建议使用分步配置：先进入stack slot视图，再执行renumber。",
         conversions: {
-            [Vendor.H3C]: "irf member renumber $1 $2",
+            [Vendor.H3C]: "irf member $1\n renumber $2\n quit",
             [Vendor.Cisco]: "switch $1 renumber $2"
         }
     },
     {
-        pattern: "stack slot (\\d+) priority",
-        explanation: "配置堆叠成员 $1 的优先级为 $2。优先级范围1-255，数值越大优先级越高，用于主设备选举。",
+        pattern: "stack slot (\\d+)",
+        explanation: "进入堆叠成员 $1 的配置视图。用于配置该成员的优先级、重编号等参数。",
         conversions: {
-            [Vendor.H3C]: "irf member priority $1 $2",
+            [Vendor.H3C]: "irf member $1",
+            [Vendor.Cisco]: "# Cisco使用全局命令配置成员"
+        }
+    },
+    {
+        pattern: "priority (\\d+)",
+        explanation: "在堆叠成员视图下配置优先级为 $1。优先级范围1-255，数值越大优先级越高，用于主设备选举。",
+        conversions: {
+            [Vendor.H3C]: "priority $1",
+            [Vendor.Cisco]: "# Cisco在全局模式使用: switch <id> priority $1"
+        }
+    },
+    {
+        pattern: "renumber (\\d+)",
+        explanation: "在堆叠成员视图下将当前成员重新编号为 $1。执行后设备会重启以使新成员ID生效。",
+        conversions: {
+            [Vendor.H3C]: "renumber $1",
+            [Vendor.Cisco]: "# Cisco在全局模式使用: switch <old-id> renumber $1"
+        }
+    },
+    {
+        pattern: "stack slot (\\d+) priority (\\d+)",
+        explanation: "（简写语法，不推荐）配置堆叠成员 $1 的优先级为 $2。建议使用分步配置：先进入stack slot视图，再配置priority。",
+        conversions: {
+            [Vendor.H3C]: "irf member $1\n priority $2\n quit",
             [Vendor.Cisco]: "switch $1 priority $2"
         }
     },
@@ -42,19 +66,11 @@ export const stackingRules = [
         }
     },
     {
-        pattern: "interface stack-port",
+        pattern: "interface stack-port (\\d+)/(\\d+)",
         explanation: "进入堆叠端口 $1/$2 视图，用于配置堆叠物理接口。注意：华为每个物理接口需要独立的stack-port。",
         conversions: {
             [Vendor.H3C]: "irf-port $1/$2",
             [Vendor.Cisco]: "# Cisco StackWise使用专用堆叠端口"
-        }
-    },
-    {
-        pattern: "port interface",
-        explanation: "将物理接口 $1 绑定到当前堆叠端口，并启用堆叠功能。",
-        conversions: {
-            [Vendor.H3C]: "port group interface $1",
-            [Vendor.Cisco]: "# Cisco StackWise使用专用堆叠线缆"
         }
     },
     {
@@ -63,6 +79,14 @@ export const stackingRules = [
         conversions: {
             [Vendor.H3C]: "port group interface $1",
             [Vendor.Cisco]: "# Cisco StackWise使用专用堆叠线缆"
+        }
+    },
+    {
+        pattern: "stack domain (\\d+)",
+        explanation: "配置堆叠域ID为 $1。域ID用于区分不同的堆叠系统。",
+        conversions: {
+            [Vendor.H3C]: "irf domain $1",
+            [Vendor.Cisco]: "stackwise-virtual domain $1"
         }
     },
     {

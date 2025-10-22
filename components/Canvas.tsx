@@ -1,7 +1,7 @@
 
 import React, { useState, useRef, useEffect, forwardRef, useImperativeHandle, memo } from 'react';
 import { Node, Connection, DeviceType } from '../types';
-import { RouterIcon, L2SwitchIcon, L3SwitchIcon, PCIcon, FirewallIcon, APIcon, ACIcon, ServerIcon, TextBoxSolidIcon, RectangleIcon, CircleIcon, RotateIcon,PrintIcon } from './Icons';
+import { RouterIcon, L2SwitchIcon, L3SwitchIcon, PCIcon, FirewallIcon, APIcon, ACIcon, ServerIcon, TextBoxSolidIcon, RectangleIcon, CircleIcon, RotateIcon, PrintIcon, POEIcon, MonitorIcon } from './Icons';
 
 interface DraggableNodeProps {
     node: Node;
@@ -231,6 +231,8 @@ const NodeComponent: React.FC<DraggableNodeProps> = memo(({ node, onMove, onNode
             case DeviceType.Firewall: return <FirewallIcon {...props} />;
             case DeviceType.AP: return <APIcon {...props} />;
             case DeviceType.AC: return <ACIcon {...props} />;
+            case DeviceType.POE: return <POEIcon {...props} />;
+            case DeviceType.Monitor: return <MonitorIcon {...props} />;
             case DeviceType.Text: return <TextBoxSolidIcon {...props} />;
             case DeviceType.Rectangle: return <RectangleIcon {...props} />;
             case DeviceType.Circle: return <CircleIcon {...props} />;

@@ -2,19 +2,19 @@ import { Vendor } from '../../types';
 
 export const stackingRules = [
     {
-        pattern: "switch (\\d+) priority",
+        pattern: "switch (\\d+) priority (\\d+)",
         explanation: "配置堆叠成员 $1 的优先级为 $2。优先级范围1-15，数值越大优先级越高，用于主设备选举。",
         conversions: {
-            [Vendor.H3C]: "irf member priority $1 $2",
+            [Vendor.H3C]: "irf member $1 priority $2",
             [Vendor.Huawei]: "stack slot $1 priority $2"
         }
     },
     {
-        pattern: "switch (\\d+) renumber",
+        pattern: "switch (\\d+) renumber (\\d+)",
         explanation: "将堆叠成员 $1 的编号重新配置为 $2。执行后目标成员会重启以使新编号生效。",
         conversions: {
-            [Vendor.H3C]: "irf member renumber $1 $2",
-            [Vendor.Huawei]: "stack member-id $1 renumber $2"
+            [Vendor.H3C]: "irf member $1 renumber $2",
+            [Vendor.Huawei]: "stack member $1 renumber $2"
         }
     },
     {
@@ -50,27 +50,19 @@ export const stackingRules = [
         }
     },
     {
-        pattern: "switch virtual domain",
+        pattern: "stackwise-virtual domain (\\d+)",
         explanation: "配置StackWise Virtual域ID为 $1。StackWise Virtual允许两台交换机作为单一逻辑设备运行。",
         conversions: {
             [Vendor.H3C]: "irf domain $1",
-            [Vendor.Huawei]: "# 华为CSS使用 css cluster-id $1"
+            [Vendor.Huawei]: "stack domain $1"
         }
     },
     {
-        pattern: "stackwise-virtual",
-        explanation: "启用StackWise Virtual功能并进入配置模式。StackWise Virtual是思科新一代虚拟化堆叠技术。",
+        pattern: "stackwise-virtual link (\\d+)",
+        explanation: "在接口下配置StackWise Virtual链路编号为 $1。SVL用于成员间的控制和数据流量传输。",
         conversions: {
-            [Vendor.H3C]: "# H3C使用IRF技术实现类似功能",
-            [Vendor.Huawei]: "# 华为使用CSS或iStack实现类似功能"
-        }
-    },
-    {
-        pattern: "stackwise-virtual link",
-        explanation: "配置StackWise Virtual链路编号为 $1。SVL用于成员间的控制和数据流量传输。",
-        conversions: {
-            [Vendor.H3C]: "irf-port <member>/<port>",
-            [Vendor.Huawei]: "interface stack-port <slot>/<port>"
+            [Vendor.H3C]: "# H3C使用irf-port配置IRF链路",
+            [Vendor.Huawei]: "# 华为使用interface stack-port配置堆叠链路"
         }
     },
     {

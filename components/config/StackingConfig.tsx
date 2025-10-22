@@ -34,13 +34,13 @@ const StackingConfig: React.FC<StackingConfigProps> = ({ selectedNode, onNodeUpd
     const stackingTechName = useMemo(() => {
         switch (vendor) {
             case Vendor.H3C:
-                return 'IRF';
+                return 'IRF (Intelligent Resilient Framework)';
             case Vendor.Huawei:
-                return 'CSS/iStack';
+                return 'CSS/iStack (Cluster Switch System)';
             case Vendor.Cisco:
-                return 'StackWise';
+                return 'StackWise / StackWise Virtual';
             default:
-                return 'IRF';
+                return 'Stacking';
         }
     }, [vendor]);
 
@@ -48,15 +48,91 @@ const StackingConfig: React.FC<StackingConfigProps> = ({ selectedNode, onNodeUpd
     const modelTypeTooltip = useMemo(() => {
         switch (vendor) {
             case Vendor.H3C:
-                return '以S7500型号为界限，之前为旧型号，之后为新型号。';
+                return '新型号：S12500/S12700等新一代交换机，需要切换到IRF模式。旧型号：S7500/S9500等，已运行在IRF模式。';
             case Vendor.Huawei:
-                return '新型号：S12700/S9700等数据中心交换机使用CSS2；旧型号：S系列传统交换机使用CSS。';
+                return '新型号：S12700/S9700等数据中心交换机使用CSS2或iStack。旧型号：S5700/S6700等传统交换机使用CSS。';
             case Vendor.Cisco:
-                return '新型号：支持StackWise Virtual的设备（如Catalyst 9000系列）；旧型号：传统StackWise设备（如3750/3850系列）。';
+                return '新型号：Catalyst 9000系列支持StackWise Virtual（虚拟堆叠）。旧型号：Catalyst 3750/3850系列使用传统StackWise（物理堆叠线缆）。';
             default:
-                return '请选择设备型号类型。';
+                return '请根据设备型号选择对应的堆叠技术类型。';
         }
     }, [vendor]);
+
+    // 配置流程说明
+    const configFlowTip = useMemo(() => {
+        switch (vendor) {
+            case Vendor.H3C:
+                return '配置流程：1️⃣ 配置基础参数 → 2️⃣ 如需重编号则重启 → 3️⃣ 保存配置 → 4️⃣ 激活IRF（新型号需切换模式）';
+            case Vendor.Huawei:
+                return '配置流程：1️⃣ 配置基础参数 → 2️⃣ 如需重编号则重启 → 3️⃣ 保存配置 → 4️⃣ 连接堆叠线缆自动形成堆叠';
+            case Vendor.Cisco:
+                return '配置流程：1️⃣ 配置基础参数 → 2️⃣ 如需重编号则重启 → 3️⃣ 保存配置 → 4️⃣ 重启设备形成堆叠';
+            default:
+                return '配置流程：先配置 → 后重编 → 再保存 → 最后重启';
+        }
+    }, [vendor]);
+
+    // 验证厂商和配置一致性
+    const validateVendorConfig = useMemo(() => {
+        const warnings: string[] = [];
+        
+        // 检查思科 StackWise Virtual 只能有2个成员
+        if (vendor === Vendor.Cisco && config.modelType === 'new' && config.members.length > 2) {
+            warnings.push('⚠️ Cisco StackWise Virtual 仅支持2台交换机组成堆叠，超出的成员将被忽略。');
+        }
+        
+        // 检查成员ID是否重复
+        const memberIds = config.members.map(m => m.newMemberId || m.memberId).filter(Boolean);
+        const duplicateIds = memberIds.filter((id, index) => memberIds.indexOf(id) !== index);
+        if (duplicateIds.length > 0) {
+            warnings.push(`⚠️ 检测到重复的成员ID: ${duplicateIds.join(', ')}。请确保每个成员ID唯一。`);
+        }
+        
+        // 检查华为设备的成员ID范围
+        if (vendor === Vendor.Huawei) {
+            const invalidIds = config.members.filter(m => {
+                const id = parseInt(m.newMemberId || m.memberId);
+                return isNaN(id) || id < 0 || id > 9;
+            });
+            if (invalidIds.length > 0) {
+                warnings.push('⚠️ 华为设备的堆叠成员ID范围通常是 0-9。');
+            }
+        }
+        
+        // 检查思科设备的成员ID范围
+        if (vendor === Vendor.Cisco) {
+            const invalidIds = config.members.filter(m => {
+                const id = parseInt(m.newMemberId || m.memberId);
+                return isNaN(id) || id < 1 || id > 9;
+            });
+            if (invalidIds.length > 0) {
+                warnings.push('⚠️ Cisco设备的堆叠成员ID范围通常是 1-9。');
+            }
+        }
+        
+        // 检查优先级范围
+        if (vendor === Vendor.Huawei) {
+            const invalidPriorities = config.members.filter(m => {
+                const priority = parseInt(m.priority);
+                return m.priority && (isNaN(priority) || priority < 1 || priority > 255);
+            });
+            if (invalidPriorities.length > 0) {
+                warnings.push('⚠️ 华为设备的优先级范围是 1-255。');
+            }
+        }
+        
+        if (vendor === Vendor.Cisco) {
+            const invalidPriorities = config.members.filter(m => {
+                const priority = parseInt(m.priority);
+                return m.priority && (isNaN(priority) || priority < 1 || priority > 15);
+            });
+            if (invalidPriorities.length > 0) {
+                warnings.push('⚠️ Cisco设备的优先级范围是 1-15。');
+            }
+        }
+        
+        return warnings;
+    }, [vendor, config.members, config.modelType]);
 
     // 根据厂商确定配置标题
     const globalConfigTitle = useMemo(() => {
@@ -170,6 +246,22 @@ const StackingConfig: React.FC<StackingConfigProps> = ({ selectedNode, onNodeUpd
             </div>
             {isExpanded && config.enabled && (
                 <div className="border-t border-slate-600 p-3 space-y-4">
+                    {/* 配置流程提示 */}
+                    <div className="p-2 bg-blue-900/30 border border-blue-700/50 rounded text-xs text-blue-300">
+                        💡 {configFlowTip}
+                    </div>
+                    
+                    {/* 验证警告 */}
+                    {validateVendorConfig.length > 0 && (
+                        <div className="space-y-1">
+                            {validateVendorConfig.map((warning, idx) => (
+                                <div key={idx} className="p-2 bg-amber-900/30 border border-amber-700/50 rounded text-xs text-amber-300">
+                                    {warning}
+                                </div>
+                            ))}
+                        </div>
+                    )}
+                    
                     <div className="p-3 bg-slate-800/50 rounded-lg space-y-3">
                         <h5 className="text-sm font-medium text-slate-300">{globalConfigTitle}</h5>
                         <div className="grid grid-cols-2 gap-3 items-center">
@@ -187,11 +279,44 @@ const StackingConfig: React.FC<StackingConfigProps> = ({ selectedNode, onNodeUpd
                                     </div>
                                 </div>
                             </Field>
-                            <Field label={domainIdLabel}><Input value={config.domainId} onChange={e => updateStackingConfig({ domainId: e.target.value })} /></Field>
+                            <Field label={domainIdLabel} note="可选，用于区分不同堆叠系统">
+                                <Input 
+                                    value={config.domainId} 
+                                    onChange={e => updateStackingConfig({ domainId: e.target.value })} 
+                                    placeholder={vendor === Vendor.Cisco ? "1-255" : "1-4294967295"}
+                                />
+                            </Field>
                         </div>
-                         {config.modelType === 'new' && vendor === Vendor.H3C && <p className="text-xs text-amber-400 bg-amber-900/50 p-2 rounded">新型号设备需要先配置成员编号，然后切换到IRF模式并重启才能使堆叠生效。</p>}
-                         {config.modelType === 'new' && vendor === Vendor.Huawei && <p className="text-xs text-amber-400 bg-amber-900/50 p-2 rounded">新型号设备使用CSS2技术，需要配置堆叠端口并连接物理线缆后自动形成堆叠。</p>}
-                         {config.modelType === 'new' && vendor === Vendor.Cisco && <p className="text-xs text-amber-400 bg-amber-900/50 p-2 rounded">StackWise Virtual需要配置虚拟链路和双活检测，配置完成后重启设备形成堆叠。</p>}
+                         {config.modelType === 'new' && vendor === Vendor.H3C && (
+                             <p className="text-xs text-amber-400 bg-amber-900/50 p-2 rounded">
+                                 📌 H3C新型号设备需要先配置成员参数，然后使用 <code className="bg-slate-700 px-1 rounded">chassis convert mode irf</code> 命令切换到IRF模式并重启。
+                             </p>
+                         )}
+                         {config.modelType === 'new' && vendor === Vendor.Huawei && (
+                             <p className="text-xs text-amber-400 bg-amber-900/50 p-2 rounded">
+                                 📌 华为新型号设备使用CSS2/iStack技术，配置堆叠端口后连接物理线缆即可自动形成堆叠。成员ID通常从0开始。
+                             </p>
+                         )}
+                         {config.modelType === 'new' && vendor === Vendor.Cisco && (
+                             <p className="text-xs text-amber-400 bg-amber-900/50 p-2 rounded">
+                                 📌 Cisco StackWise Virtual需要配置虚拟链路和双活检测，配置完成后重启设备形成堆叠。仅支持2台交换机。
+                             </p>
+                         )}
+                         {config.modelType === 'old' && vendor === Vendor.H3C && (
+                             <p className="text-xs text-blue-400 bg-blue-900/50 p-2 rounded">
+                                 📌 H3C旧型号设备已运行在IRF模式，配置完成后使用 <code className="bg-slate-700 px-1 rounded">irf-port-configuration active</code> 激活IRF端口。
+                             </p>
+                         )}
+                         {config.modelType === 'old' && vendor === Vendor.Huawei && (
+                             <p className="text-xs text-blue-400 bg-blue-900/50 p-2 rounded">
+                                 📌 华为传统CSS堆叠配置，连接堆叠线缆后自动激活。支持环形和链形拓扑。
+                             </p>
+                         )}
+                         {config.modelType === 'old' && vendor === Vendor.Cisco && (
+                             <p className="text-xs text-blue-400 bg-blue-900/50 p-2 rounded">
+                                 📌 Cisco传统StackWise使用专用堆叠线缆，连接后自动形成堆叠。主交换机选举基于优先级和MAC地址。
+                             </p>
+                         )}
                     </div>
 
                     <div className="space-y-3">
@@ -203,9 +328,38 @@ const StackingConfig: React.FC<StackingConfigProps> = ({ selectedNode, onNodeUpd
                                     <button onClick={() => removeMember(mIndex)} className="px-2 py-1 bg-red-600 hover:bg-red-700 text-white text-xs rounded">删除</button>
                                 </div>
                                 <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-                                    <Field label={config.modelType === 'old' ? "当前成员ID" : "成员ID"}><Input value={member.memberId} onChange={e => updateMember(mIndex, { memberId: e.target.value })}/></Field>
-                                    {config.modelType === 'old' && <Field label="新成员ID"><Input value={member.newMemberId} onChange={e => updateMember(mIndex, { newMemberId: e.target.value })}/></Field>}
-                                    <Field label="优先级 (1-32)"><Input value={member.priority} onChange={e => updateMember(mIndex, { priority: e.target.value })}/></Field>
+                                    <Field 
+                                        label={config.modelType === 'old' ? "当前成员ID" : "成员ID"}
+                                        note={vendor === Vendor.Huawei ? "通常 0-9" : vendor === Vendor.Cisco ? "通常 1-9" : ""}
+                                    >
+                                        <Input 
+                                            value={member.memberId} 
+                                            onChange={e => updateMember(mIndex, { memberId: e.target.value })}
+                                            placeholder={vendor === Vendor.Huawei ? "0-9" : "1-9"}
+                                        />
+                                    </Field>
+                                    {config.modelType === 'old' && (
+                                        <Field 
+                                            label="新成员ID"
+                                            note="重编号后设备将重启"
+                                        >
+                                            <Input 
+                                                value={member.newMemberId} 
+                                                onChange={e => updateMember(mIndex, { newMemberId: e.target.value })}
+                                                placeholder="可选"
+                                            />
+                                        </Field>
+                                    )}
+                                    <Field 
+                                        label={`优先级 (${vendor === Vendor.Cisco ? '1-15' : '1-255'})`}
+                                        note="数值越大优先级越高"
+                                    >
+                                        <Input 
+                                            value={member.priority} 
+                                            onChange={e => updateMember(mIndex, { priority: e.target.value })}
+                                            placeholder={vendor === Vendor.Cisco ? "1-15" : "1-255"}
+                                        />
+                                    </Field>
                                 </div>
                                 <div className="pt-2 border-t border-slate-700/50">
                                     {member.irfPorts.length > 0 && (() => {
