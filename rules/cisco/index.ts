@@ -12,6 +12,7 @@ import { ipsecRules } from './ipsec';
 import { ikeRules } from './ike';
 import { greRules } from './gre';
 import { natRules } from './nat';
+import { stackingRules } from './stacking';
 
 const ciscoRules = {
   commands: [
@@ -27,6 +28,7 @@ const ciscoRules = {
     ...ikeRules,
     ...greRules,
     ...natRules,
+    ...stackingRules,
   ]
 };
 export default ciscoRules;

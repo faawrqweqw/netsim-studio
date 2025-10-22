@@ -207,7 +207,7 @@ export const generateAllCliCommands = (node: Node, connections: Connection[]): s
         }
     };
     
-    if (config.stacking.enabled && vendor === 'H3C') {
+    if (config.stacking.enabled && (vendor === 'H3C' || vendor === Vendor.Huawei || vendor === Vendor.Cisco)) {
         const { cli: stackingCli } = generateStackingCli(vendor, config.stacking);
         appendCli('Stacking (IRF)', stackingCli);
     }

@@ -4,7 +4,7 @@ import React, { useState, useCallback, useRef, useEffect, memo } from 'react';
 // FIX: Import AppState and Topology types for multi-topology management
 import { Node, Connection, DeviceType, Vendor, Port, LinkConfig, ManagedDevice, AppState, Topology } from './types';
 import { TOOLBAR_ITEMS, SHAPE_TOOLS, DEFAULT_NODE_CONFIG, DEFAULT_NODE_STYLE, generatePorts, DEFAULT_LINK_CONFIG } from './constants';
-import { DownloadIcon, ImageIcon, TrashIcon, BroomIcon } from './components/Icons';
+import { DownloadIcon, UploadIcon, ImageIcon, TrashIcon, BroomIcon } from './components/Icons';
 import ConfigPanel from './components/ConfigPanel';
 import Canvas from './components/Canvas';
 import PortSelectionMenu from './components/PortSelectionMenu';
@@ -629,6 +629,36 @@ const App: React.FC = () => {
         }
     };
 
+    const importFromJSON = () => {
+        const input = document.createElement('input');
+        input.type = 'file';
+        input.accept = 'application/json,.json';
+        input.onchange = (e) => {
+            const file = (e.target as HTMLInputElement).files?.[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = (event) => {
+                try {
+                    const json = JSON.parse(event.target?.result as string);
+                    if (json.nodes && json.connections) {
+                        updateActiveTopology({ 
+                            nodes: json.nodes, 
+                            connections: json.connections 
+                        });
+                    } else {
+                        alert('无效的JSON文件格式。请确保文件包含 nodes 和 connections 字段。');
+                    }
+                } catch (error) {
+                    console.error('JSON解析错误:', error);
+                    alert('无法解析JSON文件，请检查文件格式是否正确。');
+                }
+            };
+            reader.readAsText(file);
+        };
+        input.click();
+    };
+
     const handleWheel = useCallback((e: React.WheelEvent<HTMLDivElement>) => {
         e.preventDefault();
         const scaleFactor = 1.1;
@@ -820,6 +850,7 @@ const App: React.FC = () => {
                             <div className="w-px h-6 bg-slate-600 mx-1"></div>
 
                             <button onClick={handleClearCanvas} className="bg-slate-700 hover:bg-slate-600 p-2 rounded-md transition-colors" title="清除画布"><BroomIcon className="w-5 h-5"/></button>
+                            <button onClick={importFromJSON} className="bg-slate-700 hover:bg-slate-600 p-2 rounded-md transition-colors" title="导入 JSON 配置"><UploadIcon className="w-5 h-5"/></button>
                             <button onClick={() => exportTo('json')} className="bg-slate-700 hover:bg-slate-600 p-2 rounded-md transition-colors" title="导出为 JSON"><DownloadIcon className="w-5 h-5"/></button>
                             <button onClick={() => exportTo('png')} className="bg-slate-700 hover:bg-slate-600 p-2 rounded-md transition-colors" title="导出为 PNG"><ImageIcon className="w-5 h-5"/></button>
                         </div>

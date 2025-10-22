@@ -15,6 +15,7 @@ import { ikeRules } from './ike';
 import { haRules } from './ha';
 import { greRules } from './gre';
 import { natRules } from './nat';
+import { stackingRules } from './stacking';
 
 const huaweiRules = {
   commands: [
@@ -33,6 +34,7 @@ const huaweiRules = {
     ...haRules,
     ...greRules,
     ...natRules,
+    ...stackingRules,
   ]
 };
 export default huaweiRules;
