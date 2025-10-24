@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>NetSim Studio</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+    <style>
+      html {
+        background-color: #0f172a; /* Corresponds to bg-slate-900 */
+      }
+      body {
+        overscroll-behavior: none;
+      }
+    </style>
+  <script type="importmap">
+{
+  "imports": {
+    "react/": "https://esm.sh/react@^19.1.1/",
+    "react": "https://esm.sh/react@^19.1.1",
+    "@google/genai": "https://esm.sh/@google/genai@^1.12.0",
+    "react-dom/": "https://esm.sh/react-dom@^19.1.1/",
+    "cors": "https://aistudiocdn.com/cors@^2.8.5",
+    "express": "https://aistudiocdn.com/express@^5.1.0",
+    "vite": "https://aistudiocdn.com/vite@^7.1.9",
+    "crypto": "https://aistudiocdn.com/crypto@^1.0.1",
+    "path": "https://aistudiocdn.com/path@^0.12.7",
+    "url": "https://aistudiocdn.com/url@^0.11.4",
+    "buffer": "https://aistudiocdn.com/buffer@^6.0.3",
+    "net": "https://aistudiocdn.com/net@^1.0.2",
+    "ssh2": "https://aistudiocdn.com/ssh2@^1.17.0",
+    "dns": "https://aistudiocdn.com/dns@^0.2.2",
+    "child_process": "https://aistudiocdn.com/child_process@^1.0.2",
+    "ws": "https://aistudiocdn.com/ws@^8.18.3",
+    "http": "https://aistudiocdn.com/http@^0.0.1-security",
+    "os": "https://aistudiocdn.com/os@^0.1.2",
+    "iconv-lite": "https://aistudiocdn.com/iconv-lite@^0.7.0"
+  }
+}
+</script>
+<link rel="stylesheet" href="/index.css">
+</head>
+  <body class="bg-slate-900 text-white antialiased">
+    <div id="root"></div>
+    <script type="module" src="/index.tsx"></script>
+  </body>
+</html>
