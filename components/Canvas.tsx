@@ -241,6 +241,7 @@ const NodeComponent: React.FC<DraggableNodeProps> = memo(({ node, onMove, onNode
     };
     
     const renderEditableText = (containerStyle: React.CSSProperties, backgroundClass: string = 'bg-transparent') => {
+        const scaledFontSize = Math.max(10, 14 / canvasScale);
         if (isEditing) {
             return (
                 <textarea
@@ -249,12 +250,22 @@ const NodeComponent: React.FC<DraggableNodeProps> = memo(({ node, onMove, onNode
                     onBlur={handleTextBlur}
                     autoFocus
                     className={`absolute inset-0 w-full h-full text-center resize-none focus:outline-none focus:ring-2 focus:ring-blue-500 rounded ${backgroundClass}`}
-                    style={{...containerStyle, zIndex: 11 }}
+                    style={{
+                        ...containerStyle, 
+                        fontSize: `${scaledFontSize}px`,
+                        zIndex: 11 
+                    }}
                 />
             );
         }
         return (
-            <div className="flex items-center justify-center h-full w-full p-2 text-center break-words" style={containerStyle}>
+            <div 
+                className="flex items-center justify-center h-full w-full p-2 text-center break-words" 
+                style={{
+                    ...containerStyle,
+                    fontSize: `${scaledFontSize}px`
+                }}
+            >
                 {node.text}
             </div>
         );
@@ -266,7 +277,8 @@ const NodeComponent: React.FC<DraggableNodeProps> = memo(({ node, onMove, onNode
             dashed: 'border border-dashed border-slate-600',
             none: 'border border-transparent'
         }[node.borderStyle || 'none'];
-        const textStyle = { color: node.style.color, fontSize: '14px' };
+        const scaledBorderWidth = Math.max(0.5, 1 / canvasScale);
+        const textStyle = { color: node.style.color };
         
         return (
             <div
@@ -275,12 +287,24 @@ const NodeComponent: React.FC<DraggableNodeProps> = memo(({ node, onMove, onNode
                 onDoubleClick={handleDoubleClick}
                 onClick={handleNodeBodyClick}
                 className={`absolute p-2 whitespace-pre-wrap rounded node-component-wrapper bg-slate-400/10 ${borderClass} ${isSelected ? 'outline-dashed outline-2 outline-blue-400 outline-offset-2' : ''}`}
-                style={{ left: node.x, top: node.y, width: node.width, height: node.height, zIndex: 1 }}
+                style={{ 
+                    left: node.x, 
+                    top: node.y, 
+                    width: node.width, 
+                    height: node.height, 
+                    zIndex: 1,
+                    borderWidth: `${scaledBorderWidth}px`
+                }}
             >
                 {renderEditableText(textStyle)}
                 {isSelected && (
                      <div
                         className="absolute -right-1 -bottom-1 w-3 h-3 bg-blue-500 cursor-se-resize rounded-full border-2 border-white resize-handle"
+                        style={{
+                            width: `${Math.max(8, 12 / canvasScale)}px`,
+                            height: `${Math.max(8, 12 / canvasScale)}px`,
+                            borderWidth: `${Math.max(1, 2 / canvasScale)}px`
+                        }}
                         onMouseDown={(e) => handleResizeMouseDown(e, 'se')}
                     />
                 )}
@@ -290,7 +314,8 @@ const NodeComponent: React.FC<DraggableNodeProps> = memo(({ node, onMove, onNode
 
     if (node.type === DeviceType.Circle) {
         const { x, y, radius = 80, style, text } = node;
-        const textStyle = { color: node.style.color, fontSize: '14px' };
+        const scaledStrokeWidth = Math.max(1, 2 / canvasScale);
+        const textStyle = { color: node.style.color };
 
         return (
              <div
@@ -302,7 +327,7 @@ const NodeComponent: React.FC<DraggableNodeProps> = memo(({ node, onMove, onNode
                 onClick={handleNodeBodyClick}
             >
                  <svg width={radius * 2} height={radius * 2} viewBox={`0 0 ${radius*2} ${radius*2}`} className={`${isConnecting ? 'cursor-crosshair' : 'cursor-pointer'}`}>
-                    <circle cx={radius} cy={radius} r={radius-1} fill={`${style.color}33`} stroke={style.color} strokeWidth="2" />
+                    <circle cx={radius} cy={radius} r={radius-1} fill={`${style.color}33`} stroke={style.color} strokeWidth={scaledStrokeWidth} />
                  </svg>
                  <div className="absolute inset-0 flex items-center justify-center pointer-events-none p-4 text-center break-words" style={{color: node.style.color}}>
                     {renderEditableText(textStyle)}
@@ -311,11 +336,25 @@ const NodeComponent: React.FC<DraggableNodeProps> = memo(({ node, onMove, onNode
                     <>
                         <div
                             className="absolute bg-blue-500/20 border-2 border-blue-500 rounded-full pointer-events-none"
-                            style={{ inset: -8, width: radius*2+16, height: radius*2+16, left: -8, top: -8 }}
+                            style={{ 
+                                inset: -8 / canvasScale, 
+                                width: radius*2 + 16 / canvasScale, 
+                                height: radius*2 + 16 / canvasScale, 
+                                left: -8 / canvasScale, 
+                                top: -8 / canvasScale,
+                                borderWidth: `${Math.max(1, 2 / canvasScale)}px`
+                            }}
                         />
                          <div
-                            className="absolute w-4 h-4 bg-blue-500 cursor-se-resize rounded-full border-2 border-white resize-handle"
-                            style={{ right: -8, bottom: -8, transform: 'translate(50%, 50%)' }}
+                            className="absolute bg-blue-500 cursor-se-resize rounded-full border-2 border-white resize-handle"
+                            style={{ 
+                                right: -8 / canvasScale, 
+                                bottom: -8 / canvasScale, 
+                                transform: 'translate(50%, 50%)',
+                                width: `${Math.max(12, 16 / canvasScale)}px`,
+                                height: `${Math.max(12, 16 / canvasScale)}px`,
+                                borderWidth: `${Math.max(1, 2 / canvasScale)}px`
+                            }}
                             onMouseDown={(e) => handleResizeMouseDown(e, 'se')}
                         />
                     </>
@@ -330,7 +369,9 @@ const NodeComponent: React.FC<DraggableNodeProps> = memo(({ node, onMove, onNode
             dashed: 'border border-dashed border-slate-400',
             none: 'border border-transparent'
         }[node.borderStyle || 'none'];
-        const textStyle = { color: node.style.color, fontSize: `${node.style.iconSize / 3}px` };
+        const scaledFontSize = Math.max(10, (node.style.iconSize / 3) / canvasScale);
+        const scaledBorderWidth = Math.max(0.5, 1 / canvasScale);
+        const textStyle = { color: node.style.color };
 
         return (
             <div
@@ -339,7 +380,16 @@ const NodeComponent: React.FC<DraggableNodeProps> = memo(({ node, onMove, onNode
                 onDoubleClick={handleDoubleClick}
                 onClick={handleNodeBodyClick}
                 className={`absolute p-2 cursor-pointer whitespace-pre-wrap rounded node-component-wrapper ${borderClass} ${isSelected ? 'outline-dashed outline-2 outline-blue-400 outline-offset-2' : ''}`}
-                style={{ left: node.x, top: node.y, width: 150, minHeight: 40, height: 'auto', zIndex: 10 }}
+                style={{ 
+                    left: node.x, 
+                    top: node.y, 
+                    width: 150, 
+                    minHeight: 40, 
+                    height: 'auto', 
+                    zIndex: 10,
+                    borderWidth: `${scaledBorderWidth}px`,
+                    fontSize: `${scaledFontSize}px`
+                }}
             >
                 {renderEditableText(textStyle, 'bg-white/80 text-black')}
             </div>
@@ -398,33 +448,66 @@ const NodeComponent: React.FC<DraggableNodeProps> = memo(({ node, onMove, onNode
                     }}
                 >
                     <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`} className="overflow-visible pointer-events-none">
-                        <ellipse cx={rx} cy={ry} rx={rx - 1} ry={ry - 1} fill="none" stroke="#a7c7e7" strokeWidth="2" />
+                        <ellipse 
+                            cx={rx} 
+                            cy={ry} 
+                            rx={rx - 1} 
+                            ry={ry - 1} 
+                            fill="none" 
+                            stroke="#a7c7e7" 
+                            strokeWidth={Math.max(1, 2 / canvasScale)} 
+                        />
                         <path
                             d={`M ${starX - 4},${starY} l 4,-4 l 4,4 l -4,4 z`}
-                            fill="#e299c8" stroke="white" strokeWidth="0.5"
+                            fill="#e299c8" 
+                            stroke="white" 
+                            strokeWidth={Math.max(0.5, 0.5 / canvasScale)}
                         />
                     </svg>
                 </div>
 
                 {isSelected && (
                     <>
-                        <div className="absolute pointer-events-none" style={{ inset: -8, border: '2px dashed #3b82f6' }} />
+                        <div 
+                            className="absolute pointer-events-none" 
+                            style={{ 
+                                inset: -8 / canvasScale, 
+                                border: `${Math.max(1, 2 / canvasScale)}px dashed #3b82f6` 
+                            }} 
+                        />
                         <div
-                            className="absolute w-3 h-3 bg-blue-500 cursor-ew-resize rounded-full border-2 border-white resize-handle"
-                            style={{ top: '50%', right: -6, transform: 'translateY(-50%)' }}
+                            className="absolute bg-blue-500 cursor-ew-resize rounded-full border-2 border-white resize-handle"
+                            style={{ 
+                                top: '50%', 
+                                right: -6 / canvasScale, 
+                                transform: 'translateY(-50%)',
+                                width: `${Math.max(8, 12 / canvasScale)}px`,
+                                height: `${Math.max(8, 12 / canvasScale)}px`,
+                                borderWidth: `${Math.max(1, 2 / canvasScale)}px`
+                            }}
                             onMouseDown={(e) => handleResizeMouseDown(e, 'right')}
                         />
                         <div
-                            className="absolute w-3 h-3 bg-blue-500 cursor-ns-resize rounded-full border-2 border-white resize-handle"
-                            style={{ left: '50%', bottom: -6, transform: 'translateX(-50%)' }}
+                            className="absolute bg-blue-500 cursor-ns-resize rounded-full border-2 border-white resize-handle"
+                            style={{ 
+                                left: '50%', 
+                                bottom: -6 / canvasScale, 
+                                transform: 'translateX(-50%)',
+                                width: `${Math.max(8, 12 / canvasScale)}px`,
+                                height: `${Math.max(8, 12 / canvasScale)}px`,
+                                borderWidth: `${Math.max(1, 2 / canvasScale)}px`
+                            }}
                             onMouseDown={(e) => handleResizeMouseDown(e, 'bottom')}
                         />
                         <div
-                            className="absolute w-6 h-6 bg-green-500 hover:bg-green-600 cursor-pointer rounded-full border-2 border-white flex items-center justify-center text-white rotation-handle"
+                            className="absolute bg-green-500 hover:bg-green-600 cursor-pointer rounded-full border-2 border-white flex items-center justify-center text-white rotation-handle"
                             style={{
-                                top: -12,
+                                top: -12 / canvasScale,
                                 left: '50%',
                                 transform: 'translateX(-50%)',
+                                width: `${Math.max(16, 24 / canvasScale)}px`,
+                                height: `${Math.max(16, 24 / canvasScale)}px`,
+                                borderWidth: `${Math.max(1, 2 / canvasScale)}px`
                             }}
                             onClick={handleRotateClick}
                             title="Rotate Halo"
@@ -448,7 +531,16 @@ const NodeComponent: React.FC<DraggableNodeProps> = memo(({ node, onMove, onNode
                 zIndex: 10
             }}
         >
-            <p className="font-medium whitespace-nowrap text-slate-800" style={nameStyle}>
+            <p 
+                className="font-medium whitespace-nowrap text-slate-800" 
+                style={{
+                    ...nameStyle,
+                    fontSize: `${Math.max(10, 14 / canvasScale)}px`,
+                    transform: `scale(${Math.max(0.6, 1 / canvasScale)})`,
+                    transformOrigin: 'center bottom',
+                    marginBottom: `${Math.max(2, 4 / canvasScale)}px`
+                }}
+            >
                 {node.name}
             </p>
             <div
@@ -465,7 +557,8 @@ const NodeComponent: React.FC<DraggableNodeProps> = memo(({ node, onMove, onNode
                     <div
                         className="absolute bg-red-500/20 border-2 border-red-500 rounded-xl pointer-events-none"
                         style={{
-                            inset: -8,
+                            inset: -8 / canvasScale,
+                            borderWidth: `${Math.max(1, 2 / canvasScale)}px`
                         }}
                     />
                 )}
@@ -517,9 +610,9 @@ const getPortNumber = (portName: string | undefined): string => {
     return match ? match[0] : '?';
 };
 
-const getSmartEdgePoint = (sourceNode: Node, targetNode: Node): { x: number; y: number } => {
-    const sx = sourceNode.x;
-    const sy = sourceNode.y;
+const getSmartEdgePoint = (sourceNode: Node, targetNode: Node, offset?: { x: number; y: number }): { x: number; y: number } => {
+    const sx = sourceNode.x + (offset?.x || 0);
+    const sy = sourceNode.y + (offset?.y || 0);
     const tx = targetNode.x;
     const ty = targetNode.y;
     const { iconSize } = sourceNode.style;
@@ -634,8 +727,20 @@ const Canvas = forwardRef<HTMLDivElement, CanvasProps>(({
         const toNode = nodes.find(n => n.id === conn.to.nodeId);
         if (!fromNode || !toNode) return;
 
-        const fromPos = getSmartEdgePoint(fromNode, toNode);
-        const toPos = getSmartEdgePoint(toNode, fromNode);
+        // 计算连接组和索引来确定正确的偏移量
+        const connectionGroup = connections.filter(c => 
+            (c.from.nodeId === conn.from.nodeId && c.to.nodeId === conn.to.nodeId) ||
+            (c.from.nodeId === conn.to.nodeId && c.to.nodeId === conn.from.nodeId)
+        );
+        const connIndex = connectionGroup.findIndex(c => c.id === conn.id);
+        const { fromOffset, toOffset } = getConnectionOffset(fromNode, toNode, connIndex, connectionGroup.length);
+        
+        // 创建带偏移的虚拟节点用于计算边缘点
+        const fromNodeWithOffset = { ...fromNode, x: fromNode.x + fromOffset.x, y: fromNode.y + fromOffset.y };
+        const toNodeWithOffset = { ...toNode, x: toNode.x + toOffset.x, y: toNode.y + toOffset.y };
+        
+        const fromPos = getSmartEdgePoint(fromNodeWithOffset, toNodeWithOffset);
+        const toPos = getSmartEdgePoint(toNodeWithOffset, fromNodeWithOffset);
         
         let pathPoints = conn.path?.points || [];
         
@@ -717,6 +822,56 @@ const Canvas = forwardRef<HTMLDivElement, CanvasProps>(({
         return acc;
     }, {} as Record<string, Connection[]>);
 
+    // 计算连接线偏移量的函数
+    const getConnectionOffset = (fromNode: Node, toNode: Node, index: number, total: number): { fromOffset: { x: number, y: number }, toOffset: { x: number, y: number } } => {
+        if (total === 1) {
+            return { fromOffset: { x: 0, y: 0 }, toOffset: { x: 0, y: 0 } };
+        }
+
+        // 计算两个节点之间的向量
+        const dx = toNode.x - fromNode.x;
+        const dy = toNode.y - fromNode.y;
+        const distance = Math.sqrt(dx * dx + dy * dy);
+        
+        if (distance === 0) {
+            return { fromOffset: { x: 0, y: 0 }, toOffset: { x: 0, y: 0 } };
+        }
+
+        // 归一化向量（连接线方向）
+        const normalizedX = dx / distance;
+        const normalizedY = dy / distance;
+
+        // 垂直于连接线的向量
+        const perpX = -normalizedY;
+        const perpY = normalizedX;
+
+        // 计算偏移量 - 改进的算法
+        const baseSpacing = 12; // 基础间距
+        const dynamicSpacing = Math.min(baseSpacing, distance / 8); // 根据距离调整间距
+        const spacing = Math.max(6, dynamicSpacing); // 最小间距为6
+        
+        // 计算偏移距离
+        const offsetDistance = (index - (total - 1) / 2) * spacing;
+
+        // 计算节点边缘的偏移，确保连接线从合适的位置出发
+        const nodeRadius = fromNode.style.iconSize / 2;
+        const edgeOffsetFactor = Math.min(0.8, (Math.abs(offsetDistance) / nodeRadius));
+        
+        // 从起始节点的偏移
+        const fromOffset = {
+            x: perpX * offsetDistance * 0.8,  // 在起始端稍微收敛
+            y: perpY * offsetDistance * 0.8
+        };
+
+        // 到目标节点的偏移
+        const toOffset = {
+            x: perpX * offsetDistance * 0.8,  // 在结束端稍微收敛
+            y: perpY * offsetDistance * 0.8
+        };
+
+        return { fromOffset, toOffset };
+    };
+
     return (
         <div
             ref={canvasInnerRef}
@@ -745,10 +900,15 @@ const Canvas = forwardRef<HTMLDivElement, CanvasProps>(({
                         const toNode = nodes.find(n => n.id === firstConn.to.nodeId);
                         if (!fromNode || !toNode) return null;
 
-                        return group.map((conn) => {
-                            const fromPos = getSmartEdgePoint(fromNode, toNode);
-                            const toPos = getSmartEdgePoint(toNode, fromNode);
+                        return group.map((conn, index) => {
+                            const { fromOffset, toOffset } = getConnectionOffset(fromNode, toNode, index, group.length);
                             
+                            // 创建带偏移的虚拟节点用于计算边缘点
+                            const fromNodeWithOffset = { ...fromNode, x: fromNode.x + fromOffset.x, y: fromNode.y + fromOffset.y };
+                            const toNodeWithOffset = { ...toNode, x: toNode.x + toOffset.x, y: toNode.y + toOffset.y };
+                            
+                            const fromPos = getSmartEdgePoint(fromNodeWithOffset, toNodeWithOffset);
+                            const toPos = getSmartEdgePoint(toNodeWithOffset, fromNodeWithOffset);
                             let pathData: string;
                             let handlePositions: { x: number, y: number }[] = [];
                             let pathPoints = conn.path?.points || [];
@@ -803,8 +963,27 @@ const Canvas = forwardRef<HTMLDivElement, CanvasProps>(({
                                 }
                             };
                             
-                            const labelFromPos = getPointOnLine(fromPos, toPos, 0.1);
-                            const labelToPos = getPointOnLine(fromPos, toPos, 0.9);
+                            // 计算标签位置，考虑缩放和多条连接线的偏移
+                            const labelFromPos = getPointOnLine(fromPos, toPos, 0.15);
+                            const labelToPos = getPointOnLine(fromPos, toPos, 0.85);
+                            
+                            // 根据缩放计算标签尺寸
+                            const scaledLabelWidth = Math.max(20, 28 / canvasScale);
+                            const scaledLabelHeight = Math.max(16, 22 / canvasScale);
+                            const scaledFontSize = Math.max(8, 11 / canvasScale);
+                            const scaledBorderWidth = Math.max(0.5, 1 / canvasScale);
+                            
+                            // 为多条连接线的标签添加额外偏移以避免重叠
+                            const labelOffset = group.length > 1 ? {
+                                from: {
+                                    x: fromOffset.x * 0.3,
+                                    y: fromOffset.y * 0.3
+                                },
+                                to: {
+                                    x: toOffset.x * 0.3,
+                                    y: toOffset.y * 0.3
+                                }
+                            } : { from: { x: 0, y: 0 }, to: { x: 0, y: 0 } };
 
                             return (
                                 <g key={conn.id}>
@@ -823,35 +1002,60 @@ const Canvas = forwardRef<HTMLDivElement, CanvasProps>(({
                                     
                                     {!isEditingFrom && (
                                         <foreignObject
-                                            x={labelFromPos.x - 12 + (conn.labelFromOffset?.x || 0)}
-                                            y={labelFromPos.y - 10 + (conn.labelFromOffset?.y || 0)}
-                                            width="24" height="20"
+                                            x={labelFromPos.x - scaledLabelWidth/2 + (conn.labelFromOffset?.x || 0) + labelOffset.from.x}
+                                            y={labelFromPos.y - scaledLabelHeight/2 + (conn.labelFromOffset?.y || 0) + labelOffset.from.y}
+                                            width={scaledLabelWidth} 
+                                            height={scaledLabelHeight}
                                             className="connection-label cursor-move pointer-events-auto overflow-visible"
                                             onMouseDown={(e) => handleLabelMouseDown(e, conn.id, 'from')}
                                             onDoubleClick={(e) => { e.stopPropagation(); onPortLabelDoubleClick(conn.id, 'from'); }}
                                         >
-                                            <div title={fromPort?.name} className="w-full h-full bg-white border border-slate-400 rounded-sm flex items-center justify-center text-black text-[10px] font-bold select-none" > {getPortNumber(fromPort?.name)} </div>
+                                            <div 
+                                                title={fromPort?.name} 
+                                                className="w-full h-full bg-white border border-slate-400 rounded-sm flex items-center justify-center text-black font-bold select-none shadow-sm"
+                                                style={{ 
+                                                    fontSize: `${scaledFontSize}px`,
+                                                    borderWidth: `${scaledBorderWidth}px`,
+                                                    minWidth: `${scaledLabelWidth}px`,
+                                                    minHeight: `${scaledLabelHeight}px`
+                                                }}
+                                            > 
+                                                {getPortNumber(fromPort?.name)} 
+                                            </div>
                                         </foreignObject>
                                     )}
                                     
                                     {!isEditingTo && (
                                         <foreignObject
-                                            x={labelToPos.x - 12 + (conn.labelToOffset?.x || 0)}
-                                            y={labelToPos.y - 10 + (conn.labelToOffset?.y || 0)}
-                                            width="24" height="20"
+                                            x={labelToPos.x - scaledLabelWidth/2 + (conn.labelToOffset?.x || 0) + labelOffset.to.x}
+                                            y={labelToPos.y - scaledLabelHeight/2 + (conn.labelToOffset?.y || 0) + labelOffset.to.y}
+                                            width={scaledLabelWidth} 
+                                            height={scaledLabelHeight}
                                             className="connection-label cursor-move pointer-events-auto overflow-visible"
                                             onMouseDown={(e) => handleLabelMouseDown(e, conn.id, 'to')}
                                             onDoubleClick={(e) => { e.stopPropagation(); onPortLabelDoubleClick(conn.id, 'to'); }}
                                         >
-                                            <div title={toPort?.name} className="w-full h-full bg-white border border-slate-400 rounded-sm flex items-center justify-center text-black text-[10px] font-bold select-none" > {getPortNumber(toPort?.name)} </div>
+                                            <div 
+                                                title={toPort?.name} 
+                                                className="w-full h-full bg-white border border-slate-400 rounded-sm flex items-center justify-center text-black font-bold select-none shadow-sm"
+                                                style={{ 
+                                                    fontSize: `${scaledFontSize}px`,
+                                                    borderWidth: `${scaledBorderWidth}px`,
+                                                    minWidth: `${scaledLabelWidth}px`,
+                                                    minHeight: `${scaledLabelHeight}px`
+                                                }}
+                                            > 
+                                                {getPortNumber(toPort?.name)} 
+                                            </div>
                                         </foreignObject>
                                     )}
 
                                     {(isEditingFrom || isEditingTo) && (
                                         <foreignObject
-                                            x={(isEditingFrom ? labelFromPos.x : labelToPos.x) - 45 + (isEditingFrom ? (conn.labelFromOffset?.x || 0) : (conn.labelToOffset?.x || 0))}
-                                            y={(isEditingFrom ? labelFromPos.y : labelToPos.y) - 12 + (isEditingFrom ? (conn.labelFromOffset?.y || 0) : (conn.labelToOffset?.y || 0))}
-                                            width="90" height="24"
+                                            x={(isEditingFrom ? labelFromPos.x : labelToPos.x) - (scaledLabelWidth * 1.8)/2 + (isEditingFrom ? (conn.labelFromOffset?.x || 0) + labelOffset.from.x : (conn.labelToOffset?.x || 0) + labelOffset.to.x)}
+                                            y={(isEditingFrom ? labelFromPos.y : labelToPos.y) - (scaledLabelHeight * 1.2)/2 + (isEditingFrom ? (conn.labelFromOffset?.y || 0) + labelOffset.from.y : (conn.labelToOffset?.y || 0) + labelOffset.to.y)}
+                                            width={scaledLabelWidth * 1.8} 
+                                            height={scaledLabelHeight * 1.2}
                                             className="pointer-events-auto overflow-visible"
                                         >
                                             <div className="w-full h-full p-1 flex items-center justify-center connection-label-input">
@@ -866,7 +1070,11 @@ const Canvas = forwardRef<HTMLDivElement, CanvasProps>(({
                                                         return match ? match[0] : '';
                                                     })()}
                                                     placeholder="端口号"
-                                                    className="bg-slate-900 text-white text-xs text-center w-full h-full border border-blue-500 rounded-sm outline-none"
+                                                    className="bg-slate-900 text-white text-center w-full h-full border border-blue-500 rounded-sm outline-none"
+                                                    style={{ 
+                                                        fontSize: `${scaledFontSize}px`,
+                                                        borderWidth: `${scaledBorderWidth}px`
+                                                    }}
                                                     autoFocus
                                                     onBlur={handlePortUpdate}
                                                     onKeyDown={(e) => {

@@ -4,7 +4,7 @@ import React, { useState, useCallback, useRef, useEffect, memo } from 'react';
 // FIX: Import AppState and Topology types for multi-topology management
 import { Node, Connection, DeviceType, Vendor, Port, LinkConfig, ManagedDevice, AppState, Topology } from './types';
 import { TOOLBAR_ITEMS, SHAPE_TOOLS, DEFAULT_NODE_CONFIG, DEFAULT_NODE_STYLE, generatePorts, DEFAULT_LINK_CONFIG } from './constants';
-import { DownloadIcon, ImageIcon, TrashIcon,UploadIcon, BroomIcon } from './components/Icons';
+import { DownloadIcon, ImageIcon, TrashIcon,UploadIcon, BroomIcon, UndoIcon } from './components/Icons';
 import ConfigPanel from './components/ConfigPanel';
 import Canvas from './components/Canvas';
 import PortSelectionMenu from './components/PortSelectionMenu';
@@ -137,11 +137,51 @@ const App: React.FC = () => {
     const panStartPos = useRef({ x: 0, y: 0 });
     const panStartTranslate = useRef({ x: 0, y: 0 });
 
+    // 历史记录状态 - 用于撤销功能
+    const [topologyHistory, setTopologyHistory] = useState<Topology[]>([]);
+    const maxHistorySize = 20; // 最多保存20个历史状态
+
     const canvasRef = useRef<HTMLDivElement>(null);
     const mainRef = useRef<HTMLElement>(null);
     const isSelectingRef = useRef(false);
     const selectionStartPos = useRef({ x: 0, y: 0 });
     const isInitialMount = useRef(true);
+
+    // 保存当前拓扑状态到历史记录
+    const saveToHistory = useCallback(() => {
+        const currentTopology = appState.topologies[appState.activeTopologyId];
+        if (currentTopology) {
+            setTopologyHistory(prev => {
+                const newHistory = [JSON.parse(JSON.stringify(currentTopology)), ...prev];
+                // 限制历史记录数量
+                return newHistory.slice(0, maxHistorySize);
+            });
+        }
+    }, [appState.topologies, appState.activeTopologyId, maxHistorySize]);
+
+    // 撤销到上一个状态
+    const handleUndo = useCallback(() => {
+        if (topologyHistory.length > 0) {
+            const previousState = topologyHistory[0];
+            const remainingHistory = topologyHistory.slice(1);
+            
+            setTopologyHistory(remainingHistory);
+            setAppState(prev => ({
+                ...prev,
+                topologies: {
+                    ...prev.topologies,
+                    [prev.activeTopologyId]: previousState
+                }
+            }));
+            
+            // 重置选择状态
+            setSelectedNodeId(null);
+            setSelectedConnectionId(null);
+            setMultiSelectedNodeIds(new Set());
+            setSelectionRect(null);
+            setEditingPortInfo(null);
+        }
+    }, [topologyHistory]);
 
     // FIX: Helper to update the currently active topology state
     const updateActiveTopology = useCallback((updates: Partial<Topology> | ((prev: Topology) => Partial<Topology>)) => {
@@ -169,6 +209,14 @@ const App: React.FC = () => {
             };
         });
     }, []);
+
+    // 带历史记录的更新函数
+    const updateActiveTopologyWithHistory = useCallback((updates: Partial<Topology> | ((prev: Topology) => Partial<Topology>)) => {
+        // 先保存当前状态到历史记录
+        saveToHistory();
+        // 然后更新
+        updateActiveTopology(updates);
+    }, [saveToHistory, updateActiveTopology]);
 
 
     // Debounced saving to localStorage
@@ -244,12 +292,16 @@ const App: React.FC = () => {
                 return { ...node, ports: newPorts };
             });
             
-        updateActiveTopology({
+        updateActiveTopologyWithHistory({
             nodes: updatedNodes,
             connections: connections.filter(c => !connectionsToDelete.has(c.id))
         });
-        resetSelection();
-    }, [nodes, connections, multiSelectedNodeIds, resetSelection, updateActiveTopology]);
+        setSelectedNodeId(null);
+        setSelectedConnectionId(null);
+        setMultiSelectedNodeIds(new Set());
+        setSelectionRect(null);
+        setEditingPortInfo(null);
+    }, [nodes, connections, multiSelectedNodeIds, updateActiveTopologyWithHistory]);
 
     const handleDelete = useCallback(() => {
         if (multiSelectedNodeIds.size > 0) {
@@ -279,11 +331,15 @@ const App: React.FC = () => {
                     return { ...n, ports: newPorts };
                 });
 
-            updateActiveTopology({
+            updateActiveTopologyWithHistory({
                 nodes: newNodes,
                 connections: connections.filter(c => !connectionsToDeleteIds.has(c.id))
             });
-            resetSelection();
+            setSelectedNodeId(null);
+            setSelectedConnectionId(null);
+            setMultiSelectedNodeIds(new Set());
+            setSelectionRect(null);
+            setEditingPortInfo(null);
         } else if (selectedConnectionId) {
             const connToDelete = connections.find(c => c.id === selectedConnectionId);
             if (!connToDelete) return;
@@ -304,13 +360,17 @@ const App: React.FC = () => {
                     return n;
                 });
             
-            updateActiveTopology({
+            updateActiveTopologyWithHistory({
                 nodes: newNodes,
                 connections: connections.filter(c => c.id !== selectedConnectionId)
             });
-            resetSelection();
+            setSelectedNodeId(null);
+            setSelectedConnectionId(null);
+            setMultiSelectedNodeIds(new Set());
+            setSelectionRect(null);
+            setEditingPortInfo(null);
         }
-    }, [connections, selectedConnectionId, selectedNodeId, multiSelectedNodeIds.size, deleteMultipleNodes, resetSelection, nodes, updateActiveTopology]);
+    }, [connections, selectedConnectionId, selectedNodeId, multiSelectedNodeIds.size, deleteMultipleNodes, nodes, updateActiveTopologyWithHistory]);
 
     useEffect(() => {
         const handleKeyDown = (e: KeyboardEvent) => {
@@ -450,10 +510,10 @@ const App: React.FC = () => {
             ...(type === DeviceType.Circle && { radius: 80, text: '' }),
             ...(type === DeviceType.Halo && { width: 200, height: 80, text: '', rotation: 0 }),
         };
-        updateActiveTopology(prev => ({ nodes: [...prev.nodes, newNode]}));
+        updateActiveTopologyWithHistory(prev => ({ nodes: [...prev.nodes, newNode]}));
         resetSelection();
         setSelectedNodeId(newNode.id);
-    }, [nodes, resetSelection, canvasTranslate, canvasScale, updateActiveTopology]);
+    }, [nodes, resetSelection, canvasTranslate, canvasScale, updateActiveTopologyWithHistory]);
 
     const addConnectionByPort = useCallback((fromNodeId: string, fromPortId: string, toNodeId: string, toPortId: string, type: 'solid' | 'dashed') => {
         const connectionId = `conn-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
@@ -488,11 +548,11 @@ const App: React.FC = () => {
             config: JSON.parse(JSON.stringify(DEFAULT_LINK_CONFIG)),
         };
 
-        updateActiveTopology(prev => ({
+        updateActiveTopologyWithHistory(prev => ({
             nodes: newNodes,
             connections: [...prev.connections, newConnection]
         }));
-    }, [nodes, updateActiveTopology]);
+    }, [nodes, updateActiveTopologyWithHistory]);
     
     const handlePortSelect = useCallback((nodeId: string, port: Port) => {
         if (!connectionStart) { // This is the first port selection in a connection attempt
@@ -715,18 +775,24 @@ const App: React.FC = () => {
 
 
     const handleClearCanvas = useCallback(() => {
-        if (window.confirm('确定要清除整个画布吗？此操作无法撤销。')) {
-            updateActiveTopology({
+        if (window.confirm('确定要清除整个画布吗？您可以使用撤销按钮恢复。')) {
+            updateActiveTopologyWithHistory({
                 nodes: [],
                 connections: [],
                 managedDevices: [],
                 canvasTranslate: { x: 0, y: 0 },
                 canvasScale: 1,
             });
-            resetSelection();
-            resetConnectionState();
+            setSelectedNodeId(null);
+            setSelectedConnectionId(null);
+            setMultiSelectedNodeIds(new Set());
+            setSelectionRect(null);
+            setEditingPortInfo(null);
+            setConnectionStart(null);
+            setPortMenuState(null);
+            setPreviewLine(null);
         }
-    }, [updateActiveTopology, resetSelection, resetConnectionState]);
+    }, [updateActiveTopologyWithHistory]);
 
     const handleNewTopology = useCallback(() => {
         setAppState(prev => {
@@ -885,6 +951,18 @@ const App: React.FC = () => {
 
                             <div className="w-px h-6 bg-slate-600 mx-1"></div>
 
+                            <button 
+                                onClick={handleUndo} 
+                                disabled={topologyHistory.length === 0}
+                                className={`p-2 rounded-md transition-colors ${
+                                    topologyHistory.length === 0 
+                                        ? 'bg-slate-600 text-slate-400 cursor-not-allowed' 
+                                        : 'bg-slate-700 hover:bg-slate-600 text-white'
+                                }`} 
+                                title={`撤销 (${topologyHistory.length} 个历史状态)`}
+                            >
+                                <UndoIcon className="w-5 h-5"/>
+                            </button>
                             <button onClick={handleClearCanvas} className="bg-slate-700 hover:bg-slate-600 p-2 rounded-md transition-colors" title="清除画布"><BroomIcon className="w-5 h-5"/></button>
                             <button onClick={importFromJSON} className="bg-slate-700 hover:bg-slate-600 p-2 rounded-md transition-colors" title="导入 JSON 配置"><UploadIcon className="w-5 h-5"/></button>
                             <button onClick={() => exportTo('json')} className="bg-slate-700 hover:bg-slate-600 p-2 rounded-md transition-colors" title="导出为 JSON"><DownloadIcon className="w-5 h-5"/></button>

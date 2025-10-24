@@ -774,6 +774,13 @@ export const ImageIcon: React.FC<{ className?: string }> = ({ className }) => (
     </svg>
 );
 
+export const UndoIcon: React.FC<{ className?: string }> = ({ className }) => (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
+        <path d="M3 7v6h6" />
+        <path d="M21 17a9 9 0 00-9-9 9 9 0 00-6 2.3L3 13" />
+    </svg>
+);
+
 export const TrashIcon: React.FC<{ className?: string }> = ({ className }) => (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
         <polyline points="3 6 5 6 21 6" />
