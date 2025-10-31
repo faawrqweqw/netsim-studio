@@ -49,7 +49,7 @@ const NodeInfo: React.FC<NodeInfoProps> = ({ selectedNode, nodes, connections, o
     };
 
     return (
-        <div className="space-y-4 overflow-y-auto">
+        <div className="space-y-4">
             <div>
                 <label className="block text-sm font-medium text-slate-400 mb-1">Device Name</label>
                 <input

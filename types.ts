@@ -41,7 +41,7 @@ export interface ParsedData {
 }
 
 export interface ParsedResult {
-    type: 'cpu' | 'memory' | 'fan' | 'power' | 'temperature' | 'deviceInfo' | 'unknown';
+    type: 'cpu' | 'memory' | 'fan' | 'power' | 'temperature' | 'version' | 'interface' | 'deviceInfo' | 'unknown';
     data: ParsedData;
     original: string;
 }

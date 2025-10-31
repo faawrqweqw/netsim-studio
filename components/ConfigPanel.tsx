@@ -439,7 +439,7 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({ selectedNode, selectedConnect
                 return <NodeInfo selectedNode={selectedNode} nodes={nodes} connections={connections} onNodeUpdate={onNodeUpdate} onConnectionUpdate={onConnectionUpdate} />;
             case 'manage':
                 return (
-                    <div className="space-y-2 h-full overflow-y-auto">
+                    <div className="space-y-2">
                         <div className="bg-slate-800 rounded-lg overflow-hidden">
                             <div className="flex justify-between items-center p-3 cursor-pointer bg-slate-900/50 hover:bg-slate-900/80" onClick={() => toggleSection('generalConfig')}>
                                 <div className="flex items-center gap-3">
@@ -745,7 +745,7 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({ selectedNode, selectedConnect
                         </button>
                     ))}
                 </div>
-                <div className="flex-1 p-4 min-h-0">{renderTabContent()}</div>
+                <div className="flex-1 p-4 overflow-y-auto">{renderTabContent()}</div>
             </div>
             {renderWirelessModal()}
         </>

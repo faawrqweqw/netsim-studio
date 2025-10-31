@@ -4,14 +4,16 @@
 import React, { useState, useCallback, useMemo, useEffect } from 'react';
 import { Node, ManagedDevice, OperationalDevice, Vendor, DeviceType, DeviceRuntimeStatus } from '../types';
 // FIX: Removed unused icon imports (FolderIcon, UploadIcon, DownloadIcon) that were causing export errors.
-import { WifiIcon, CalculatorIcon, ServerIcon, ListIcon } from './Icons';
+import { WifiIcon, CalculatorIcon, InspectionIcon, ListIcon, SettingsIcon, BackupIcon } from './Icons';
 import DeviceInspectionView from './DeviceInspectionView';
 import SubnetCalculator from './SubnetCalculator';
 import { BatchPingView } from './BatchPingView';
-import DeviceManagementView from './DeviceManagementView';
+import EnhancedDeviceManagement from './EnhancedDeviceManagement';
+import TemplateManager from './TemplateManager';
+import ConfigBackupView from './backup/ConfigBackupView';
 
 
-type OpsView = 'inspection' | 'ping' | 'calculator' | 'management';
+type OpsView = 'inspection' | 'ping' | 'calculator' | 'management' | 'templates' | 'backup';
 
 interface OperationsDashboardProps {
     nodes: Node[];
@@ -117,7 +119,11 @@ const OperationsDashboard: React.FC<OperationsDashboardProps> = ({ nodes, onNode
             case 'calculator':
                 return <SubnetCalculator />;
             case 'management':
-                return <DeviceManagementView devices={managedDevices} onUpdate={onManagedDevicesUpdate} />;
+                return <EnhancedDeviceManagement devices={managedDevices} onUpdate={onManagedDevicesUpdate} />;
+            case 'templates':
+                return <TemplateManager />;
+            case 'backup':
+                return <ConfigBackupView managedDevices={managedDevices} onManagedDevicesUpdate={onManagedDevicesUpdate} />;
             default:
                 return null;
         }
@@ -125,9 +131,11 @@ const OperationsDashboard: React.FC<OperationsDashboardProps> = ({ nodes, onNode
     
     const menuItems: { id: OpsView, label: string, icon: React.ReactNode }[] = [
         { id: 'management', label: '设备管理', icon: <ListIcon className="w-5 h-5"/> },
-        { id: 'inspection', label: '配置巡检', icon: <ServerIcon className="w-5 h-5"/> },
+        { id: 'inspection', label: '配置巡检', icon: <InspectionIcon className="w-5 h-5"/> },
+        { id: 'templates', label: '模板管理', icon: <SettingsIcon className="w-5 h-5"/> },
         { id: 'ping', label: '批量Ping', icon: <WifiIcon className="w-5 h-5"/> },
         { id: 'calculator', label: 'IP子网计算', icon: <CalculatorIcon className="w-5 h-5"/> },
+        { id: 'backup', label: '备份配置', icon: <BackupIcon className="w-5 h-5"/> },
     ];
 
     return (

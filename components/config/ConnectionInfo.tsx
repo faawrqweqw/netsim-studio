@@ -158,7 +158,7 @@ const ConnectionItem: React.FC<{
                     </div>
                     <div className="mt-4">
                         <h5 className="text-sm font-semibold mb-1 text-slate-300">CLI Preview</h5>
-                        <pre className="text-xs bg-slate-900 rounded p-2 overflow-x-auto whitespace-pre-wrap h-24">
+                        <pre className="text-xs bg-slate-900 rounded p-2 overflow-auto whitespace-pre-wrap max-h-32">
                             {cliPreview || <span className="text-slate-500">Select a mode to see CLI commands.</span>}
                         </pre>
                     </div>

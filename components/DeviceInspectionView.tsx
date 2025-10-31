@@ -2,6 +2,22 @@ import React, { useState, useEffect, useMemo, Fragment, useCallback, useRef } fr
 import { OperationalDevice, Vendor, DeviceRuntimeStatus as RuntimeState, ParsedResult } from '../types';
 import { DownloadIcon } from './Icons';
 
+// Template interfaces to match TemplateManager
+interface CommandTemplate {
+  name: string;
+  vendor: string;
+  deviceType: string;
+  commands: CommandEntry[];
+}
+
+interface CommandEntry {
+  id: string;
+  name: string;
+  cmd: string;
+  parse?: string;
+  category: string;
+}
+
 // === Simple API client with timeout + JSON helper ===
 const apiFetch = async (url: string, opts: RequestInit = {}, timeout = 15000) => {
   const controller = new AbortController();
@@ -78,6 +94,49 @@ const StructuredDataViewer: React.FC<{ data: ParsedResult }> = ({ data }) => {
             return renderTable('Power Supply Status', data.data.power, 'status');
         case 'temperature':
             return renderTable('Temperature Status', data.data.temperatures, 'status', 'value');
+        case 'version':
+            return (
+                <div>
+                    <h5 className="text-xs font-semibold text-slate-400 mb-2">Version Information</h5>
+                    <div className="space-y-1">
+                        {Object.entries(data.data).map(([key, value]) => (
+                            <div key={key} className="flex gap-2 text-xs">
+                                <span className="text-slate-400 min-w-[120px]">{key}:</span>
+                                <span className="text-white font-mono">{value}</span>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            );
+        case 'interface':
+            return (
+                <div>
+                    <h5 className="text-xs font-semibold text-slate-400 mb-1">Interface Status</h5>
+                    <table className="w-full text-xs my-2">
+                        <thead>
+                            <tr className="border-b border-slate-700">
+                                <th className="py-1 text-left text-slate-400">Interface</th>
+                                <th className="py-1 text-left text-slate-400">IP Address</th>
+                                <th className="py-1 text-right text-slate-400">Status</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {data.data.interfaces.map((iface: any, index: number) => (
+                                <tr key={index} className="border-b border-slate-700/50">
+                                    <td className="py-1 pr-2 text-slate-300">{iface.name}</td>
+                                    <td className="py-1 pr-2 font-mono text-white">{iface.ip || '-'}</td>
+                                    <td className={`py-1 text-right font-semibold ${
+                                        iface.status === 'up' ? 'text-green-400' : 
+                                        iface.status === 'down' ? 'text-red-400' : 'text-gray-400'
+                                    }`}>
+                                        {iface.status.toUpperCase()} / {iface.protocol.toUpperCase()}
+                                    </td>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+                </div>
+            );
         default:
             return null; // Hide unknown types from summary
     }
@@ -299,26 +358,92 @@ const DeviceInspectionView: React.FC<{ devices: OperationalDevice[]; onUpdateDev
   const manageableDevices = useMemo(() => devices.filter(d => d.vendor !== Vendor.Generic), [devices]);
   const uniqueVendors = useMemo(() => Array.from(new Set(manageableDevices.map(d => d.vendor))), [manageableDevices]);
 
+  const lastTemplateCheck = useRef<string | null>(localStorage.getItem('inspection-templates'));
+
   useEffect(() => {
-    let mounted = true;
-    (async () => {
+    const loadTemplatesFromLocalStorage = () => {
         const newTemplates: Record<string, any> = {};
         const newCategories: Record<string, string[]> = {};
-        for (const vendor of uniqueVendors) {
-            try {
-                const templatesData: any[] = await apiFetch(`/api/inspection/templates/${vendor}`);
-                newTemplates[vendor] = templatesData || [];
-                const allCats = new Set<string>();
-                (templatesData || []).forEach((t: any) => (t.categories || []).forEach((c: string) => allCats.add(c)));
-                newCategories[vendor] = Array.from(allCats);
-            } catch (e) { console.error(`Failed to fetch templates for ${vendor}:`, e); }
+
+        try {
+            // Load templates from localStorage (created by TemplateManager)
+            const storedTemplates = localStorage.getItem('inspection-templates');
+            if (storedTemplates) {
+                const templates: CommandTemplate[] = JSON.parse(storedTemplates);
+
+                // Group templates by vendor
+                for (const vendor of uniqueVendors) {
+                    const vendorTemplates = templates.filter(t => t.vendor === vendor);
+
+                    // Convert to the format expected by the inspection view
+                    newTemplates[vendor] = vendorTemplates.map(template => ({
+                        name: template.name,
+                        categories: Array.from(new Set(template.commands.map(cmd => cmd.category)))
+                    }));
+
+                    // Extract all unique categories for this vendor
+                    const allCats = new Set<string>();
+                    vendorTemplates.forEach(template =>
+                        template.commands.forEach(cmd => allCats.add(cmd.category))
+                    );
+                    newCategories[vendor] = Array.from(allCats);
+                }
+            }
+
+            // Add default fallback templates if no custom ones exist
+            for (const vendor of uniqueVendors) {
+                if (!newTemplates[vendor] || newTemplates[vendor].length === 0) {
+                    // Fallback to basic inspection categories
+                    const defaultCategories = ['性能监控', '硬件状态', '接口监控', '业务状态'];
+                    newTemplates[vendor] = [
+                        { name: '基础巡检', categories: ['性能监控', '硬件状态'] },
+                        { name: '完整巡检', categories: defaultCategories }
+                    ];
+                    newCategories[vendor] = defaultCategories;
+                }
+            }
+        } catch (e) {
+            // Fallback to default templates for all vendors
+            for (const vendor of uniqueVendors) {
+                const defaultCategories = ['性能监控', '硬件状态', '接口监控', '业务状态'];
+                newTemplates[vendor] = [
+                    { name: '基础巡检', categories: ['性能监控', '硬件状态'] },
+                    { name: '完整巡检', categories: defaultCategories }
+                ];
+                newCategories[vendor] = defaultCategories;
+            }
         }
-        if (mounted) {
-            setTemplatesByVendor(newTemplates);
-            setAvailableCategories(newCategories);
+
+        setTemplatesByVendor(newTemplates);
+        setAvailableCategories(newCategories);
+    };
+
+    loadTemplatesFromLocalStorage();
+
+    // Listen for localStorage changes (when templates are updated in TemplateManager)
+    // Note: storage event only fires from other windows, so we also need to check periodically
+    const handleStorageChange = (e: StorageEvent) => {
+        if (e.key === 'inspection-templates') {
+            loadTemplatesFromLocalStorage();
         }
-    })();
-    return () => { mounted = false; };
+    };
+
+    // Polling mechanism to detect template changes within the same window
+    const checkForTemplateChanges = () => {
+        const currentTemplates = localStorage.getItem('inspection-templates');
+        if (currentTemplates !== lastTemplateCheck.current) {
+            lastTemplateCheck.current = currentTemplates;
+            loadTemplatesFromLocalStorage();
+        }
+    };
+
+    window.addEventListener('storage', handleStorageChange);
+    const pollInterval = setInterval(checkForTemplateChanges, 2000); // Check every 2 seconds
+
+    return () => {
+        window.removeEventListener('storage', handleStorageChange);
+        clearInterval(pollInterval);
+    };
   }, [uniqueVendors]);
   
   const onUpdateDeviceRuntime = useCallback((deviceId: string, updater: (prev?: RuntimeState) => RuntimeState) => {
@@ -353,15 +478,15 @@ const DeviceInspectionView: React.FC<{ devices: OperationalDevice[]; onUpdateDev
               lastInspected: lastInspected || prev?.lastInspected,
             }
           });
-        } catch (e) { console.error('WS parse error', e); }
+        } catch (e) { /* ignore parse errors */ }
       };
-      ws.onerror = (err) => {
-          console.error('WebSocket error:', err);
+      ws.onerror = () => {
+          // WebSocket error
       }
       ws.onclose = () => {
-          console.log('WebSocket connection closed.');
+          // WebSocket closed
       }
-    } catch (e) { console.warn('WebSocket connection failed.'); }
+    } catch (e) { /* WebSocket connection failed */ }
     return () => ws && ws.close();
   }, []);
 
@@ -429,6 +554,87 @@ const DeviceInspectionView: React.FC<{ devices: OperationalDevice[]; onUpdateDev
 
     await limitConcurrency(toInspect, async (device) => {
       try {
+        // Get the specific commands from the selected template
+        let commandsToRun: CommandEntry[] = [];
+
+        // Always try to load template commands when categories are selected
+        try {
+          let storedTemplates = localStorage.getItem('inspection-templates');
+
+          // If no templates exist, initialize with default templates
+          if (!storedTemplates) {
+            const defaultTemplates = [
+              {
+                name: 'Huawei交换机基础巡检',
+                vendor: 'Huawei',
+                deviceType: 'Switch',
+                commands: [
+                  { id: '1', name: 'CPU使用率', cmd: 'display cpu-usage', parse: 'CPU utilization for five seconds: (\\d+)%', category: '性能监控' },
+                  { id: '2', name: '内存使用率', cmd: 'display memory', parse: 'Memory Using Rate : (\\d+)%', category: '性能监控' },
+                  { id: '3', name: '接口状态', cmd: 'display interface brief', parse: '', category: '接口监控' },
+                  { id: '4', name: 'MAC地址表', cmd: 'display mac-address', parse: '', category: '业务状态' },
+                  { id: '5', name: 'VLAN信息', cmd: 'display vlan', parse: '', category: '业务状态' },
+                ]
+              },
+              {
+                name: 'H3C交换机基础巡检',
+                vendor: 'H3C',
+                deviceType: 'Switch',
+                commands: [
+                  { id: '1', name: 'CPU使用率', cmd: 'display cpu-usage', parse: 'CPU utilization for five seconds: (\\d+)%', category: '查看CPU使用率' },
+                  { id: '2', name: '内存使用率', cmd: 'display memory', parse: 'FreeRatio\\s+(\\d+\\.?\\d*)%', category: '查询内存使用率' },
+                  { id: '3', name: '系统版本', cmd: 'display version', parse: '', category: '查看系统版本' },
+                  { id: '4', name: '风扇状态', cmd: 'display fan', parse: '', category: '硬件状态' },
+                  { id: '5', name: '电源状态', cmd: 'display power', parse: '', category: '硬件状态' },
+                  { id: '6', name: '接口状态', cmd: 'display interface brief', parse: '', category: '接口监控' },
+                  { id: '7', name: 'MAC地址表', cmd: 'display mac-address', parse: '', category: '业务状态' },
+                ]
+              },
+              {
+                name: 'Cisco基础巡检',
+                vendor: 'Cisco',
+                deviceType: 'Switch',
+                commands: [
+                  { id: '1', name: 'CPU使用率', cmd: 'show processes cpu', parse: 'CPU utilization for five seconds: (\\d+)%', category: '性能监控' },
+                  { id: '2', name: '内存使用率', cmd: 'show memory summary', parse: '', category: '性能监控' },
+                  { id: '3', name: '环境状态', cmd: 'show environment all', parse: '', category: '硬件状态' },
+                  { id: '4', name: '接口状态', cmd: 'show interface brief', parse: '', category: '接口监控' },
+                ]
+              }
+            ];
+            localStorage.setItem('inspection-templates', JSON.stringify(defaultTemplates));
+            storedTemplates = JSON.stringify(defaultTemplates);
+          }
+
+          if (storedTemplates) {
+            const templates: CommandTemplate[] = JSON.parse(storedTemplates);
+
+            // Try to find the template first
+            let template = null;
+            if (selectedTemplate) {
+              template = templates.find(t =>
+                t.vendor === device.vendor && t.name === selectedTemplate
+              );
+            }
+
+            // If no specific template selected, try to find any template for this vendor that has matching categories
+            if (!template && selectedCategories.size > 0) {
+              template = templates.find(t =>
+                t.vendor === device.vendor &&
+                t.commands.some(cmd => selectedCategories.has(cmd.category))
+              );
+            }
+
+            if (template) {
+              commandsToRun = template.commands.filter(cmd =>
+                selectedCategories.has(cmd.category)
+              );
+            }
+          }
+        } catch (e) {
+          console.error('Failed to load template commands:', e);
+        }
+
         const payload = {
           deviceId: device.id,
           host: device.management.ipAddress,
@@ -436,7 +642,15 @@ const DeviceInspectionView: React.FC<{ devices: OperationalDevice[]; onUpdateDev
           password: device.management.credentials.password,
           vendor: device.vendor,
           categories: Array.from(selectedCategories),
+          // Add the specific commands from the template
+          commands: commandsToRun.length > 0 ? commandsToRun.map(cmd => ({
+            name: cmd.name,
+            cmd: cmd.cmd,
+            parse: cmd.parse,
+            category: cmd.category
+          })) : undefined
         };
+
         await apiFetch('/api/inspect', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }, 600000);
 
       } catch (err: any) {

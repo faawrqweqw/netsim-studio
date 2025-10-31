@@ -3,7 +3,7 @@
 import express, { Request, Response } from 'express';
 import { createServer } from 'http';
 import { WebSocketServer, WebSocket } from 'ws';
-import { spawn, exec } from 'child_process';
+import { exec } from 'child_process';
 import path from 'path';
 import cors from 'cors';
 import { fileURLToPath } from 'url';
@@ -12,10 +12,13 @@ import crypto from 'crypto';
 import { Buffer } from 'buffer';
 import net from 'net';
 import { promises as dns } from 'dns';
-import { ProgressCallback, SshCredentials } from './scripts/inspection/types';
+import { ProgressCallback } from './scripts/inspection/types';
 import os from 'os';
 import iconv from 'iconv-lite';
 import { parseCommandOutput } from './scripts/inspection/parsers';
+import fs from 'fs/promises';
+import cron from 'node-cron';
+import * as Diff from 'diff';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -25,8 +28,9 @@ const PORT = 3001;
 
 const corsOptions = {
   origin: 'http://localhost:5173',
-  methods: ['POST', 'GET', 'OPTIONS'],
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type'],
+  credentials: true
 };
 
 app.use(cors(corsOptions));
@@ -72,6 +76,217 @@ function broadcast(message: object) {
 const connections = new Map<string, { conn: Client, stream: ClientChannel }>();
 // In-memory store for inspection history
 const inspectionHistory = new Map<string, any[]>();
+// In-memory store for scheduled backup tasks
+const scheduledTasks = new Map<string, { task: cron.ScheduledTask; devices: any[]; cronExpression: string }>();
+
+// 提取备份逻辑为可复用函数
+async function performBackupForDevice(deviceId: string, deviceName: string, deviceIp: string, devicePort: number, deviceUsername: string, devicePassword: string, deviceVendor: string): Promise<{ success: boolean; backup?: any; error?: string }> {
+    try {
+        const conn = new Client();
+        const command = getConfigCommand(deviceVendor);
+        
+        return await new Promise((resolve) => {
+            const timeout = setTimeout(() => {
+                conn.end();
+                resolve({ success: false, error: 'Connection timeout' });
+            }, 60000);
+
+            conn.on('ready', () => {
+                clearTimeout(timeout);
+                conn.shell(async (err, stream) => {
+                    if (err) {
+                        conn.end();
+                        return resolve({ success: false, error: err.message });
+                    }
+
+                    let output = '';
+                    let commandSent = false;
+                    let outputProcessed = false;
+                    let dataTimeout: NodeJS.Timeout;
+                    
+                    const resetDataTimeout = () => {
+                        if (dataTimeout) clearTimeout(dataTimeout);
+                        dataTimeout = setTimeout(() => {
+                            if (commandSent && output.length > 200 && !outputProcessed) {
+                                stream.end('quit\r');
+                                setTimeout(() => {
+                                    conn.end();
+                                    processOutput();
+                                }, 1000);
+                            }
+                        }, 5000);
+                    };
+
+                    const processOutput = async () => {
+                        if (outputProcessed) return;
+                        outputProcessed = true;
+                        
+                        try {
+                            let cleanOutput = output
+                                .replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '')
+                                .replace(/\r/g, '')
+                                .replace(/\x08/g, '')
+                                .replace(/---- More ----/g, '')
+                                .replace(/-- More --/g, '')
+                                .replace(/--More--/g, '')
+                                .replace(/\[\d+D/g, '')
+                                .replace(/\s+$/gm, '');
+                            
+                            const lines = cleanOutput.split('\n').filter(line => line.trim() !== '');
+                            let configStartIndex = -1;
+                            let configEndIndex = lines.length;
+                            
+                            for (let i = 0; i < lines.length; i++) {
+                                if (lines[i].includes(command)) {
+                                    configStartIndex = i + 1;
+                                    break;
+                                }
+                            }
+                            
+                            if (configStartIndex !== -1) {
+                                for (let i = configStartIndex; i < lines.length; i++) {
+                                    const line = lines[i].trim();
+                                    if (line.match(/^[<\[].*[>\]]$/) || 
+                                        line.match(/^\S+#\s*$/) || 
+                                        line.match(/^\S+>\s*$/) ||
+                                        line === 'quit' ||
+                                        line === 'return' ||
+                                        line.startsWith('Error:') ||
+                                        line.startsWith('%')) {
+                                        configEndIndex = i;
+                                        break;
+                                    }
+                                }
+                                cleanOutput = lines.slice(configStartIndex, configEndIndex).join('\n').trim();
+                            }
+                            
+                            if (cleanOutput.length < 100) {
+                                cleanOutput = output;
+                            }
+
+                            const backupDir = path.join(__dirname, 'backups', deviceName);
+                            await fs.mkdir(backupDir, { recursive: true });
+                            
+                            const now = new Date();
+                            const chinaTime = new Date(now.getTime() + (8 * 60 * 60 * 1000));
+                            const timestamp = chinaTime.toISOString()
+                                .replace(/T/, '_')
+                                .replace(/\..+/, '')
+                                .replace(/:/g, '-');
+                            
+                            const filename = `${deviceName}_${timestamp}.cfg`;
+                            const filepath = path.join(backupDir, filename);
+                            
+                            await fs.writeFile(filepath, cleanOutput, 'utf8');
+                            
+                            const backup = {
+                                id: crypto.randomUUID(),
+                                deviceId,
+                                deviceName,
+                                timestamp: new Date().toISOString(),
+                                filename,
+                                filepath,
+                                size: cleanOutput.length
+                            };
+                            
+                            resolve({ success: true, backup });
+                        } catch (err: any) {
+                            resolve({ success: false, error: err.message });
+                        }
+                    };
+
+                    stream.on('data', (data: Buffer) => {
+                        const chunk = data.toString();
+                        output += chunk;
+                        
+                        if (commandSent) {
+                            if (chunk.includes('---- More ----') || chunk.includes('-- More --') || chunk.includes('--More--')) {
+                                stream.write(' ');
+                                resetDataTimeout();
+                                return;
+                            }
+                            if (chunk.match(/--\s*More\s*--.*lines/i)) {
+                                stream.write(' ');
+                                resetDataTimeout();
+                                return;
+                            }
+                            if (chunk.match(/\x1b\[\d+D/) || chunk.match(/\[\d+D/)) {
+                                resetDataTimeout();
+                                return;
+                            }
+                            resetDataTimeout();
+                        }
+                        
+                        if (!commandSent && (chunk.includes('>') || chunk.includes('#') || chunk.includes(']'))) {
+                            setTimeout(() => {
+                                stream.write(command + '\n');
+                                commandSent = true;
+                                resetDataTimeout();
+                            }, 500);
+                        }
+                    }).on('close', () => {
+                        if (dataTimeout) clearTimeout(dataTimeout);
+                        conn.end();
+                        if (!outputProcessed) {
+                            processOutput();
+                        }
+                    });
+                    
+                    stream.stderr.on('data', () => {
+                        // 忽略错误输出
+                    });
+                });
+            }).on('error', (err) => {
+                clearTimeout(timeout);
+                resolve({ success: false, error: err.message });
+            }).connect({
+                host: deviceIp,
+                port: devicePort,
+                username: deviceUsername,
+                password: devicePassword,
+                readyTimeout: 20000,
+                algorithms: {
+                    kex: [
+                        'diffie-hellman-group1-sha1',
+                        'diffie-hellman-group14-sha1',
+                        'diffie-hellman-group-exchange-sha1',
+                        'diffie-hellman-group-exchange-sha256',
+                        'ecdh-sha2-nistp256',
+                        'ecdh-sha2-nistp384',
+                        'ecdh-sha2-nistp521'
+                    ],
+                    cipher: [
+                        'aes128-ctr',
+                        'aes192-ctr',
+                        'aes256-ctr',
+                        'aes128-gcm',
+                        'aes256-gcm',
+                        'aes128-cbc',
+                        'aes192-cbc',
+                        'aes256-cbc',
+                        '3des-cbc'
+                    ],
+                    hmac: [
+                        'hmac-sha2-256',
+                        'hmac-sha2-512',
+                        'hmac-sha1',
+                        'hmac-sha1-96'
+                    ],
+                    serverHostKey: [
+                        'ssh-rsa',
+                        'ssh-dss',
+                        'ecdsa-sha2-nistp256',
+                        'ecdsa-sha2-nistp384',
+                        'ecdsa-sha2-nistp521',
+                        'ssh-ed25519'
+                    ]
+                }
+            } as ConnectConfig);
+        });
+    } catch (error: any) {
+        return { success: false, error: error.message };
+    }
+}
 
 
 // --- New NetOps Endpoints ---
@@ -270,24 +485,6 @@ app.post('/api/ping', async (req: Request, res: Response) => {
     }
 });
 
-// FIX: Use Request and Response types from 'express' to fix type errors.
-app.get('/api/inspection/templates/:vendor', async (req: Request, res: Response) => {
-    const { vendor } = req.params;
-    if (!vendor || typeof vendor !== 'string') return res.status(400).json({ error: 'Vendor is required.' });
-
-    try {
-        const vendorScriptPath = `./scripts/inspection/${vendor.toLowerCase()}.ts`;
-        const scriptModule: { categories?: string[] } = await import(vendorScriptPath);
-        const categories = scriptModule.categories || [];
-        const templates = [
-            { name: '基础巡检', categories: categories.filter(c => c.includes('基本') || c.includes('巡检')) },
-            { name: '完整巡检', categories: categories },
-        ];
-        res.json(templates);
-    } catch (error) {
-        res.status(404).json({ error: `Templates for vendor '${vendor}' not found.` });
-    }
-});
 
 // FIX: Use Request and Response types from 'express' to fix type errors.
 app.get('/api/inspection/history/:deviceId', (req: Request, res: Response) => {
@@ -298,7 +495,7 @@ app.get('/api/inspection/history/:deviceId', (req: Request, res: Response) => {
 
 // FIX: Use Request and Response types from 'express' to fix type errors.
 app.post('/api/inspect', (req: Request, res: Response) => {
-    const { deviceId, host, port: portStr = '22', username, password, vendor, categories: categoriesToRun } = req.body;
+    const { deviceId, host, port: portStr = '22', username, password, vendor, categories: categoriesToRun, commands: templateCommands } = req.body;
     const port = parseInt(portStr, 10);
 
     if (!deviceId || !host || !username || !password || isNaN(port) || !vendor) {
@@ -316,7 +513,6 @@ app.post('/api/inspect', (req: Request, res: Response) => {
     // The inspection runs in the background
     (async () => {
         const progressCallback: ProgressCallback = (update) => {
-            console.log(`Inspection progress for ${deviceId}:`, update);
             broadcast({ deviceId, taskId, ...update });
         };
 
@@ -324,25 +520,30 @@ app.post('/api/inspect', (req: Request, res: Response) => {
         let finalError: string | undefined;
 
         try {
-            console.log(`Starting inspection for device ${deviceId} (${vendor}) with categories:`, categoriesToRun);
-            
-            const vendorScriptPath = `./scripts/inspection/${vendor.toLowerCase()}.ts`;
-            // The script now only exports command definitions
-            const scriptModule: { COMMAND_CATEGORIES: Record<string, string[]> } = await import(vendorScriptPath);
 
-            if (!scriptModule.COMMAND_CATEGORIES) throw new Error(`Invalid script for ${vendor}: COMMAND_CATEGORIES not found.`);
-            
-            const allCommandsToRun: { category: string, command: string }[] = [];
-            categoriesToRun.forEach(category => {
-                const commands = scriptModule.COMMAND_CATEGORIES[category];
-                if (commands) {
-                    finalResults[category] = {};
-                    commands.forEach(command => allCommandsToRun.push({ category, command }));
+            const allCommandsToRun: { category: string, command: string, parse?: string, name?: string }[] = [];
+
+            // Process template commands only
+            if (!templateCommands || !Array.isArray(templateCommands) || templateCommands.length === 0) {
+                throw new Error('Template commands are required for inspection.');
+            }
+
+            templateCommands.forEach(templateCmd => {
+                if (templateCmd.cmd && categoriesToRun.includes(templateCmd.category)) {
+                    if (!finalResults[templateCmd.category]) {
+                        finalResults[templateCmd.category] = {};
+                    }
+                    allCommandsToRun.push({
+                        category: templateCmd.category,
+                        command: templateCmd.cmd,
+                        parse: templateCmd.parse,
+                        name: templateCmd.name
+                    });
                 }
             });
 
             if (allCommandsToRun.length === 0) {
-                throw new Error('No commands found for the selected categories.');
+                throw new Error(`No commands found for the selected categories: [${categoriesToRun.join(', ')}]`);
             }
 
             progressCallback({ 
@@ -436,9 +637,10 @@ app.post('/api/inspect', (req: Request, res: Response) => {
                             const commandToSend = commandInfo.command.trim();
                             
                             if (commandInfo.category !== '_setup') {
+                                const commandDisplayName = (commandInfo as any).name || commandInfo.command;
                                 progressCallback({
                                     progress: Math.min(99, ((commandIndex -1) / allCommandsToRun.length) * 100),
-                                    log: { [commandInfo.category]: { [commandInfo.command]: 'Running...' } }
+                                    log: { [commandInfo.category]: { [commandDisplayName]: 'Running...' } }
                                 });
                             }
                             stream.write(`${commandToSend}\necho ${marker}\n`);
@@ -472,9 +674,11 @@ app.post('/api/inspect', (req: Request, res: Response) => {
                                 
                                 if (finishedCommandInfo && finishedCommandInfo.category !== '_setup') {
                                     const { category, command } = finishedCommandInfo;
-                                    
+                                    const commandDisplayName = (finishedCommandInfo as any).name || command;
+                                    const customParse = (finishedCommandInfo as any).parse;
+
                                     let cleanedOutput = outputBlock;
-                                    
+
                                     // 1. Remove command echo from the start
                                     const commandLines = command.split('\n');
                                     for (const cmdLine of commandLines) {
@@ -485,19 +689,34 @@ app.post('/api/inspect', (req: Request, res: Response) => {
                                     // 2. Remove the echo command for the marker and the preceding prompt
                                     const echoPattern = new RegExp(`echo\\s+${marker.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*`, 'g');
                                     cleanedOutput = cleanedOutput.replace(echoPattern, '');
-                                    
+
                                     // 3. Remove device prompt lines
                                     cleanedOutput = cleanedOutput.replace(/^.*[#>$]\s*$/gm, '');
 
                                     // 4. Trim excess newlines
                                     cleanedOutput = cleanedOutput.replace(/^\s*\n/gm, '').trim();
-                                    
-                                    const parsedData = parseCommandOutput(vendor as any, command, cleanedOutput || 'No output returned.');
-                                    finalResults[category][command] = parsedData;
-                                    
+
+                                    let parsedData;
+                                    const rawParsedResult = parseCommandOutput(vendor as any, command, cleanedOutput || 'No output returned.');
+
+                                    // Ensure we always return an object format for the frontend
+                                    if (typeof rawParsedResult === 'string') {
+                                        // Parser returned raw string, wrap it in proper format
+                                        parsedData = {
+                                            type: 'raw',
+                                            original: rawParsedResult,
+                                            data: { raw: rawParsedResult }
+                                        };
+                                    } else {
+                                        // Parser returned ParsedResult object
+                                        parsedData = rawParsedResult;
+                                    }
+
+                                    finalResults[category][commandDisplayName] = parsedData;
+
                                     progressCallback({
                                         progress: Math.min(99, ((commandIndex -1) / allCommandsToRun.length) * 100),
-                                        log: { [category]: { [command]: parsedData } }
+                                        log: { [category]: { [commandDisplayName]: parsedData } }
                                     });
                                 }
                                 
@@ -512,7 +731,7 @@ app.post('/api/inspect', (req: Request, res: Response) => {
                         stream.on('close', () => resolve());
                         stream.on('error', (streamErr) => reject(streamErr));
                         stream.stderr.on('data', (data: Buffer) => {
-                           console.error(`[STDERR] ${data.toString()}`);
+                           // Suppress STDERR output in production
                         });
                         
                     });
@@ -522,11 +741,8 @@ app.post('/api/inspect', (req: Request, res: Response) => {
             }
 
         } catch (error: any) {
-            console.error(`Inspection failed for ${deviceId}:`, error);
-            finalError = error.code === 'MODULE_NOT_FOUND' ? 
-                `Script for '${vendor}' not found.` : 
-                `Inspection failed: ${error.message}`;
-            
+            finalError = `Inspection failed: ${error.message}`;
+
             const errorLog = { 'Error': { 'Inspection Failed': finalError, 'Details': error.stack || error.toString() } };
             Object.assign(finalResults, errorLog);
         }
@@ -577,7 +793,7 @@ app.post('/api/ssh/connect', (req: Request, res: Response) => {
             try {
                 connections.delete(sessionId);
             } catch (e) {
-                console.error('Error during cleanup:', e);
+                // Suppress cleanup errors
             }
         };
 
@@ -587,7 +803,7 @@ app.post('/api/ssh/connect', (req: Request, res: Response) => {
                 try {
                     res.status(500).json({ error });
                 } catch (e) {
-                    console.error('Error sending error response:', e);
+                    // Suppress response error logging
                 }
             }
         };
@@ -598,7 +814,7 @@ app.post('/api/ssh/connect', (req: Request, res: Response) => {
                 try {
                     res.json(data);
                 } catch (e) {
-                    console.error('Error sending success response:', e);
+                    // Suppress response error logging
                 }
             }
         };
@@ -701,7 +917,6 @@ app.post('/api/ssh/connect', (req: Request, res: Response) => {
             sendError(`Connection setup failed: ${connectError instanceof Error ? connectError.message : String(connectError)}`);
         }
     } catch (error) {
-        console.error('Unexpected error in SSH connect:', error);
         if (!res.headersSent) {
             res.status(500).json({ error: 'Internal server error' });
         }
@@ -758,6 +973,617 @@ app.post('/api/ssh/disconnect', (req: Request, res: Response) => {
     }
     if (!res.headersSent) {
         res.status(200).send();
+    }
+});
+
+// --- Backup Configuration Endpoints ---
+
+// Helper function to get device config command by vendor
+function getConfigCommand(vendor: string): string {
+    const commands: Record<string, string> = {
+        huawei: 'display current-configuration',
+        cisco: 'show running-config',
+        h3c: 'display current-configuration',
+        ruijie: 'show running-config'
+    };
+    return commands[vendor.toLowerCase()] || 'show running-config';
+}
+
+// Test device connection
+app.post('/api/device/test', async (req: Request, res: Response) => {
+    const { ip, port = 22, username, password } = req.body;
+    
+    if (!ip || !username || !password) {
+        return res.status(400).json({ success: false, error: 'Missing required parameters' });
+    }
+
+    const conn = new Client();
+    let responseSent = false;
+    
+    const timeout = setTimeout(() => {
+        if (!responseSent) {
+            responseSent = true;
+            conn.end();
+            res.status(500).json({ success: false, error: 'Connection timeout' });
+        }
+    }, 10000);
+
+    conn.on('ready', () => {
+        clearTimeout(timeout);
+        if (!responseSent) {
+            responseSent = true;
+            conn.end();
+            res.json({ success: true, message: 'Connection successful' });
+        }
+    }).on('error', (err) => {
+        clearTimeout(timeout);
+        if (!responseSent) {
+            responseSent = true;
+            res.status(400).json({ success: false, error: err.message });
+        }
+    }).connect({
+        host: ip,
+        port: parseInt(port),
+        username,
+        password,
+        readyTimeout: 10000,
+        algorithms: {
+            kex: [
+                'diffie-hellman-group1-sha1',
+                'diffie-hellman-group14-sha1',
+                'diffie-hellman-group-exchange-sha1',
+                'diffie-hellman-group-exchange-sha256',
+                'ecdh-sha2-nistp256',
+                'ecdh-sha2-nistp384',
+                'ecdh-sha2-nistp521'
+            ],
+            cipher: [
+                'aes128-ctr',
+                'aes192-ctr',
+                'aes256-ctr',
+                'aes128-gcm',
+                'aes256-gcm',
+                'aes128-cbc',
+                'aes192-cbc',
+                'aes256-cbc',
+                '3des-cbc'
+            ],
+            hmac: [
+                'hmac-sha2-256',
+                'hmac-sha2-512',
+                'hmac-sha1',
+                'hmac-sha1-96'
+            ],
+            serverHostKey: [
+                'ssh-rsa',
+                'ssh-dss',
+                'ecdsa-sha2-nistp256',
+                'ecdsa-sha2-nistp384',
+                'ecdsa-sha2-nistp521',
+                'ssh-ed25519'
+            ]
+        }
+    } as ConnectConfig);
+});
+
+// Backup device configuration
+app.post('/api/device/backup', async (req: Request, res: Response) => {
+    const { id, name, ip, port = 22, username, password, vendor } = req.body;
+    
+    if (!name || !ip || !username || !password || !vendor) {
+        return res.status(400).json({ success: false, error: 'Missing required parameters' });
+    }
+
+    try {
+        const conn = new Client();
+        const command = getConfigCommand(vendor);
+        
+        await new Promise<void>((resolve, reject) => {
+            const timeout = setTimeout(() => {
+                conn.end();
+                reject(new Error('Connection timeout'));
+            }, 60000); // 增加超时时间到 60 秒
+
+            conn.on('ready', () => {
+                clearTimeout(timeout);
+                
+                // 使用 shell 模式而不是 exec，更适合真机设备
+                conn.shell((err, stream) => {
+                    if (err) {
+                        conn.end();
+                        return reject(err);
+                    }
+
+                    let output = '';
+                    let commandSent = false;
+                    let outputProcessed = false;
+                    let dataTimeout: NodeJS.Timeout;
+                    
+                    // 设置数据接收超时，如果 5 秒内没有新数据，认为命令执行完成
+                    const resetDataTimeout = () => {
+                        if (dataTimeout) clearTimeout(dataTimeout);
+                        dataTimeout = setTimeout(() => {
+                            if (commandSent && output.length > 200 && !outputProcessed) {
+                                stream.end('quit\r');
+                                setTimeout(() => {
+                                    conn.end();
+                                    processOutput();
+                                }, 1000);
+                            }
+                        }, 5000);
+                    };
+
+                    const processOutput = async () => {
+                        if (outputProcessed) {
+                            return;
+                        }
+                        outputProcessed = true;
+                        
+                        try {
+                            // 清理输出：移除 ANSI 控制字符、分页符和多余的提示符
+                            let cleanOutput = output
+                                .replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '') // 移除 ANSI 颜色代码
+                                .replace(/\r/g, '') // 移除回车符
+                                .replace(/\x08/g, '') // 移除退格符
+                                .replace(/---- More ----/g, '') // 移除华为/华三分页符
+                                .replace(/-- More --/g, '') // 移除华三分页符
+                                .replace(/--More--/g, '') // 移除思科分页符
+                                .replace(/\[\d+D/g, '') // 移除 ANSI 光标控制
+                                .replace(/\s+$/gm, ''); // 移除行尾空格
+                            
+                            // 提取配置内容：从命令后开始到最后一个提示符之前
+                            const lines = cleanOutput.split('\n').filter(line => line.trim() !== '');
+                            let configStartIndex = -1;
+                            let configEndIndex = lines.length;
+                            
+                            // 找到命令执行的开始位置
+                            for (let i = 0; i < lines.length; i++) {
+                                if (lines[i].includes(command)) {
+                                    configStartIndex = i + 1;
+                                    break;
+                                }
+                            }
+                            
+                            // 找到配置结束位置（下一个提示符）
+                            if (configStartIndex !== -1) {
+                                for (let i = configStartIndex; i < lines.length; i++) {
+                                    const line = lines[i].trim();
+                                    // 检测常见的设备提示符
+                                    if (line.match(/^[<\[].*[>\]]$/) || 
+                                        line.match(/^\S+#\s*$/) || 
+                                        line.match(/^\S+>\s*$/) ||
+                                        line === 'quit' ||
+                                        line === 'return' ||
+                                    line.startsWith('Error:') ||
+                                        line.startsWith('%')) {
+                                        configEndIndex = i;
+                                        break;
+                                    }
+                                }
+                                
+                                cleanOutput = lines.slice(configStartIndex, configEndIndex).join('\n').trim();
+                            }
+                            
+                            // 如果没有提取到内容，使用原始输出
+                            if (cleanOutput.length < 100) {
+                                cleanOutput = output;
+                            }
+
+                            // Save backup file
+                            const backupDir = path.join(__dirname, 'backups', name);
+                            await fs.mkdir(backupDir, { recursive: true });
+                            
+                            // 格式化时间戳：中国上海时区 (UTC+8) YYYY-MM-DD_HH-mm-ss
+                            const now = new Date();
+                            const chinaTime = new Date(now.getTime() + (8 * 60 * 60 * 1000));
+                            const timestamp = chinaTime.toISOString()
+                                .replace(/T/, '_')
+                                .replace(/\..+/, '')
+                                .replace(/:/g, '-');
+                            
+                            // 文件名格式：设备名称_时间.cfg
+                            const filename = `${name}_${timestamp}.cfg`;
+                            const filepath = path.join(backupDir, filename);
+                            
+                            await fs.writeFile(filepath, cleanOutput, 'utf8');
+                            
+                            const backup = {
+                                id: crypto.randomUUID(),
+                                deviceId: id,
+                                deviceName: name,
+                                timestamp: new Date().toISOString(),
+                                filename,
+                                filepath,
+                                size: cleanOutput.length
+                            };
+                            
+                            res.json({ success: true, backup });
+                            resolve();
+                        } catch (err: any) {
+                            reject(err);
+                        }
+                    };
+
+                    stream.on('data', (data: Buffer) => {
+                        const chunk = data.toString();
+                        output += chunk;
+                        
+                        // 检测分页符并自动翻页
+                        if (commandSent) {
+                            // 华为/华三设备的分页符：---- More ----
+                            if (chunk.includes('---- More ----')) {
+                                stream.write(' ');
+                                resetDataTimeout();
+                                return;
+                            }
+                            
+                            // 华三设备的另一种分页符：-- More --
+                            if (chunk.includes('-- More --')) {
+                                stream.write(' ');
+                                resetDataTimeout();
+                                return;
+                            }
+                            
+                            // 思科设备的分页符：--More--
+                            if (chunk.includes('--More--')) {
+                                stream.write(' ');
+                                resetDataTimeout();
+                                return;
+                            }
+                            
+                            // 检测到 lines 关键字（某些设备显示 "--More-- lines 1-24"）
+                            if (chunk.match(/--\s*More\s*--.*lines/i)) {
+                                stream.write(' ');
+                                resetDataTimeout();
+                                return;
+                            }
+                            
+                            // 检测 ANSI 控制符（分页清除后留下的）
+                            if (chunk.match(/\x1b\[\d+D/) || chunk.match(/\[\d+D/)) {
+                                resetDataTimeout();
+                                return;
+                            }
+                            
+                            // 命令发送后，重置超时计时器
+                            resetDataTimeout();
+                        }
+                        
+                        // 等待设备准备好（出现提示符），然后发送命令
+                        if (!commandSent && (chunk.includes('>') || chunk.includes('#') || chunk.includes(']'))) {
+                            // 等待一小段时间确保设备就绪
+                            setTimeout(() => {
+                                stream.write(command + '\n');
+                                commandSent = true;
+                                resetDataTimeout();
+                            }, 500);
+                        }
+                    }).on('close', () => {
+                        if (dataTimeout) clearTimeout(dataTimeout);
+                        conn.end();
+                        if (!res.headersSent && !outputProcessed) {
+                            processOutput();
+                        }
+                    });
+                    
+                    stream.stderr.on('data', (data: Buffer) => {
+                        // 记录错误但不阻断
+                        console.error('stderr:', data.toString());
+                    });
+                });
+            }).on('error', (err) => {
+                clearTimeout(timeout);
+                reject(err);
+            }).connect({
+                host: ip,
+                port: parseInt(port),
+                username,
+                password,
+                readyTimeout: 20000,
+                algorithms: {
+                    kex: [
+                        'diffie-hellman-group1-sha1',
+                        'diffie-hellman-group14-sha1',
+                        'diffie-hellman-group-exchange-sha1',
+                        'diffie-hellman-group-exchange-sha256',
+                        'ecdh-sha2-nistp256',
+                        'ecdh-sha2-nistp384',
+                        'ecdh-sha2-nistp521'
+                    ],
+                    cipher: [
+                        'aes128-ctr',
+                        'aes192-ctr',
+                        'aes256-ctr',
+                        'aes128-gcm',
+                        'aes256-gcm',
+                        'aes128-cbc',
+                        'aes192-cbc',
+                        'aes256-cbc',
+                        '3des-cbc'
+                    ],
+                    hmac: [
+                        'hmac-sha2-256',
+                        'hmac-sha2-512',
+                        'hmac-sha1',
+                        'hmac-sha1-96'
+                    ],
+                    serverHostKey: [
+                        'ssh-rsa',
+                        'ssh-dss',
+                        'ecdsa-sha2-nistp256',
+                        'ecdsa-sha2-nistp384',
+                        'ecdsa-sha2-nistp521',
+                        'ssh-ed25519'
+                    ]
+                }
+            } as ConnectConfig);
+        });
+    } catch (error: any) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+// Get backup history for a device
+app.get('/api/device/:deviceName/backups', async (req: Request, res: Response) => {
+    try {
+        const { deviceName } = req.params;
+        const backupDir = path.join(__dirname, 'backups', deviceName);
+        
+        try {
+            const files = await fs.readdir(backupDir);
+            const backups = await Promise.all(
+                files.filter(f => f.endsWith('.cfg')).map(async (file) => {
+                    const filepath = path.join(backupDir, file);
+                    const stats = await fs.stat(filepath);
+                    return {
+                        id: crypto.randomUUID(),
+                        filename: file,
+                        filepath,
+                        timestamp: stats.mtime.toISOString(),
+                        size: stats.size
+                    };
+                })
+            );
+            
+            backups.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+            res.json({ success: true, backups });
+        } catch (error: any) {
+            if (error.code === 'ENOENT') {
+                res.json({ success: true, backups: [] });
+            } else {
+                throw error;
+            }
+        }
+    } catch (error: any) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+// Get backup content
+app.get('/api/backup/content', async (req: Request, res: Response) => {
+    try {
+        const { filepath } = req.query;
+        if (!filepath || typeof filepath !== 'string') {
+            return res.status(400).json({ success: false, error: 'Filepath is required' });
+        }
+
+        const content = await fs.readFile(filepath, 'utf8');
+        res.json({ success: true, content });
+    } catch (error: any) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+// Get backup content (alias)
+app.get('/api/backups/content', async (req: Request, res: Response) => {
+    try {
+        const { filepath } = req.query;
+        if (!filepath || typeof filepath !== 'string') {
+            return res.status(400).json({ success: false, error: 'Filepath is required' });
+        }
+
+        const content = await fs.readFile(filepath, 'utf8');
+        res.json({ success: true, content });
+    } catch (error: any) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+// Delete backup
+app.delete('/api/backup', async (req: Request, res: Response) => {
+    try {
+        const { filepath } = req.body;
+        if (!filepath) {
+            return res.status(400).json({ success: false, error: 'Filepath is required' });
+        }
+
+        await fs.unlink(filepath);
+        res.json({ success: true, message: 'Backup deleted successfully' });
+    } catch (error: any) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+// Compare backups (diff)
+app.post('/api/diff/backups', async (req: Request, res: Response) => {
+    try {
+        const { oldFilepath, newFilepath } = req.body;
+
+        if (!oldFilepath || !newFilepath) {
+            return res.status(400).json({ 
+                success: false, 
+                error: 'Both oldFilepath and newFilepath are required' 
+            });
+        }
+
+        const oldContent = await fs.readFile(oldFilepath, 'utf8');
+        const newContent = await fs.readFile(newFilepath, 'utf8');
+
+        const changes = Diff.diffLines(oldContent, newContent);
+        const stats = {
+            added: 0,
+            removed: 0,
+            unchanged: 0
+        };
+
+        changes.forEach(change => {
+            const lines = change.value.split('\n').length - 1;
+            if (change.added) {
+                stats.added += lines;
+            } else if (change.removed) {
+                stats.removed += lines;
+            } else {
+                stats.unchanged += lines;
+            }
+        });
+
+        res.json({ 
+            success: true, 
+            diff: { 
+                changes, 
+                stats,
+                patch: Diff.createPatch('config', oldContent, newContent, oldFilepath, newFilepath)
+            } 
+        });
+    } catch (error: any) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+// Create scheduled backup task
+app.post('/api/scheduler/task', (req: Request, res: Response) => {
+    try {
+        const { cronExpression, devices } = req.body;
+
+        if (!cronExpression || !devices || !Array.isArray(devices)) {
+            return res.status(400).json({ 
+                success: false, 
+                error: 'cronExpression and devices array are required' 
+            });
+        }
+
+        if (!cron.validate(cronExpression)) {
+            return res.status(400).json({
+                success: false,
+                error: 'Invalid cron expression'
+            });
+        }
+
+        const taskId = crypto.randomUUID();
+
+        const task = cron.schedule(cronExpression, async () => {
+            console.log(`[${new Date().toISOString()}] 执行定时任务1: ${taskId}`);
+            
+            // 並联执行所有设备的备份
+            const backupResults: any[] = [];
+            
+            for (const device of devices) {
+                try {
+                    // 检查设备是否有必要的信息
+                    if (!device.management?.ipAddress || !device.management?.credentials?.username || !device.management?.credentials?.password) {
+                        console.warn(`[警告] 设备 ${device.name} 信息不完整，跳过备份`);
+                        backupResults.push({
+                            deviceId: device.id,
+                            deviceName: device.name,
+                            success: false,
+                            error: '设备信息不完整'
+                        });
+                        continue;
+                    }
+                    
+                    console.log(`[开始] 执行设备 ${device.name} (${device.management.ipAddress}) 的备份`);
+                    
+                    const result = await performBackupForDevice(
+                        device.id,
+                        device.name,
+                        device.management.ipAddress,
+                        device.management.port || 22,
+                        device.management.credentials.username,
+                        device.management.credentials.password,
+                        device.vendor
+                    );
+                    
+                    backupResults.push({
+                        deviceId: device.id,
+                        deviceName: device.name,
+                        ...result
+                    });
+                    
+                    if (result.success) {
+                        console.log(`[成功] 设备 ${device.name} 备份完成，文件: ${result.backup?.filename}`);
+                    } else {
+                        console.error(`[失败] 设备 ${device.name} 备份失败: ${result.error}`);
+                    }
+                } catch (error: any) {
+                    console.error(`[错误] 设备 ${device.name} 备份发生异常: ${error.message}`);
+                    backupResults.push({
+                        deviceId: device.id,
+                        deviceName: device.name,
+                        success: false,
+                        error: error.message
+                    });
+                }
+                
+                // 延迟 100ms 以便不同设备之间的连接冲突
+                await new Promise(resolve => setTimeout(resolve, 100));
+            }
+            
+            console.log(`[完成] 定时任务 ${taskId} 执行完成。成功: ${backupResults.filter(r => r.success).length}/${backupResults.length}`);
+            
+            // 可选: 技查结果发送给所有连接的 WebSocket 客户端
+            broadcast({
+                type: 'scheduled-backup-complete',
+                taskId,
+                timestamp: new Date().toISOString(),
+                totalDevices: devices.length,
+                successCount: backupResults.filter(r => r.success).length,
+                results: backupResults
+            });
+        });
+
+        scheduledTasks.set(taskId, { task, devices, cronExpression });
+
+        res.json({ 
+            success: true, 
+            taskId,
+            message: 'Scheduled task created successfully' 
+        });
+    } catch (error: any) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+// Remove scheduled task
+app.delete('/api/scheduler/task/:taskId', (req: Request, res: Response) => {
+    try {
+        const { taskId } = req.params;
+
+        const taskData = scheduledTasks.get(taskId);
+        if (taskData) {
+            taskData.task.stop();
+            scheduledTasks.delete(taskId);
+            console.log(`[删除] 定时任务 ${taskId} 已删除`);
+            res.json({ success: true, message: 'Task removed successfully' });
+        } else {
+            res.status(404).json({ success: false, error: 'Task not found' });
+        }
+    } catch (error: any) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+// List scheduled tasks
+app.get('/api/scheduler/tasks', (req: Request, res: Response) => {
+    try {
+        const tasks = Array.from(scheduledTasks.entries()).map(([id, data]) => ({
+            id,
+            cronExpression: data.cronExpression,
+            deviceCount: data.devices.length,
+            devices: data.devices.map(d => ({ id: d.id, name: d.name })),
+            status: data.task.status // Returns 'started' or 'stopped'
+        }));
+        res.json({ success: true, tasks });
+    } catch (error: any) {
+        res.status(500).json({ success: false, error: error.message });
     }
 });
 
