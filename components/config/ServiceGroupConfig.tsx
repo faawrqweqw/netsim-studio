@@ -41,32 +41,35 @@ const ServiceGroupConfig: React.FC<ServiceGroupConfigProps> = ({ selectedNode, o
 
     const addMember = (groupIndex: number) => {
         const newMember: ServiceMember = { id: `sm-${Date.now()}`, protocol: 'tcp' };
-        const newGroups = [...config.serviceGroups];
-        newGroups[groupIndex].members.push(newMember);
+        const newGroups = config.serviceGroups.map((g, i) =>
+            i === groupIndex ? { ...g, members: [...g.members, newMember] } : g
+        );
         updateObjectGroups({ serviceGroups: newGroups });
     };
 
     const updateMember = (groupIndex: number, memberIndex: number, updates: Partial<ServiceMember>) => {
-        const newGroups = [...config.serviceGroups];
-        const newMembers = [...newGroups[groupIndex].members];
-        const oldMember = newMembers[memberIndex];
-        const newMember = { ...oldMember, ...updates };
+        const newGroups = config.serviceGroups.map((g, i) => {
+            if (i !== groupIndex) return g;
+            const oldMember = g.members[memberIndex];
+            const nextMember: ServiceMember = { ...oldMember, ...updates } as ServiceMember;
 
-        // Reset fields when protocol changes
-        if (oldMember.protocol !== newMember.protocol) {
-            newMember.sourcePortOperator = undefined; newMember.sourcePort1 = ''; newMember.sourcePort2 = '';
-            newMember.destinationPortOperator = undefined; newMember.destinationPort1 = ''; newMember.destinationPort2 = '';
-            newMember.icmpType = ''; newMember.icmpCode = '';
-        }
-        
-        newMembers[memberIndex] = newMember;
-        newGroups[groupIndex].members = newMembers;
+            // Reset fields when protocol changes
+            if (oldMember.protocol !== nextMember.protocol) {
+                nextMember.sourcePortOperator = undefined; nextMember.sourcePort1 = ''; nextMember.sourcePort2 = '';
+                nextMember.destinationPortOperator = undefined; nextMember.destinationPort1 = ''; nextMember.destinationPort2 = '';
+                nextMember.icmpType = ''; nextMember.icmpCode = '';
+            }
+
+            const nextMembers = g.members.map((m, mi) => mi === memberIndex ? nextMember : m);
+            return { ...g, members: nextMembers };
+        });
         updateObjectGroups({ serviceGroups: newGroups });
     };
     
     const removeMember = (groupIndex: number, memberIndex: number) => {
-        const newGroups = [...config.serviceGroups];
-        newGroups[groupIndex].members = newGroups[groupIndex].members.filter((_, i) => i !== memberIndex);
+        const newGroups = config.serviceGroups.map((g, i) =>
+            i === groupIndex ? { ...g, members: g.members.filter((_, mi) => mi !== memberIndex) } : g
+        );
         updateObjectGroups({ serviceGroups: newGroups });
     };
     
