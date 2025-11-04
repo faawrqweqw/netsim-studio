@@ -46,20 +46,25 @@ const DomainGroupConfig: React.FC<DomainGroupConfigProps> = ({ selectedNode, onN
 
     const addMember = (groupIndex: number) => {
         const newMember: DomainMember = { id: `dm-${Date.now()}`, name: 'www.example.com' };
-        const newGroups = [...config.domainGroups];
-        newGroups[groupIndex].members.push(newMember);
+        const newGroups = config.domainGroups.map((g, i) =>
+            i === groupIndex ? { ...g, members: [...g.members, newMember] } : g
+        );
         updateObjectGroups({ domainGroups: newGroups });
     };
 
     const updateMember = (groupIndex: number, memberIndex: number, updates: Partial<DomainMember>) => {
-        const newGroups = [...config.domainGroups];
-        newGroups[groupIndex].members[memberIndex] = { ...newGroups[groupIndex].members[memberIndex], ...updates };
+        const newGroups = config.domainGroups.map((g, i) => {
+            if (i !== groupIndex) return g;
+            const nextMembers = g.members.map((m, mi) => mi === memberIndex ? { ...m, ...updates } : m);
+            return { ...g, members: nextMembers };
+        });
         updateObjectGroups({ domainGroups: newGroups });
     };
 
     const removeMember = (groupIndex: number, memberIndex: number) => {
-        const newGroups = [...config.domainGroups];
-        newGroups[groupIndex].members = newGroups[groupIndex].members.filter((_, i) => i !== memberIndex);
+        const newGroups = config.domainGroups.map((g, i) =>
+            i === groupIndex ? { ...g, members: g.members.filter((_, mi) => mi !== memberIndex) } : g
+        );
         updateObjectGroups({ domainGroups: newGroups });
     };
 
