@@ -431,7 +431,9 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({ selectedNode, selectedConnect
         );
     }
     
-    const allCliCommands = generateAllCliCommands(selectedNode, connections);
+    // NOTE: Generating all CLI commands can be expensive and was previously executed on every render
+    // which caused noticeable UI stalls while editing forms. We now generate them only when the
+    // Commands tab is active to keep the Manage UI responsive.
 
     const renderTabContent = () => {
         switch (activeTab) {
@@ -713,7 +715,8 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({ selectedNode, selectedConnect
                         )}
                     </div>
                 );
-            case 'commands': return <CommandsView cliCommands={allCliCommands} vendor={selectedNode.vendor} />;
+            case 'commands':
+                return <CommandsView cliCommands={generateAllCliCommands(selectedNode, connections)} vendor={selectedNode.vendor} />;
             case 'helper':
                 return <CommandHelperView vendor={selectedNode.vendor} />;
             default: return null;
