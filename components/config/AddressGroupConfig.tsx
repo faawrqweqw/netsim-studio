@@ -41,36 +41,39 @@ const AddressGroupConfig: React.FC<AddressGroupConfigProps> = ({ selectedNode, o
 
     const addMember = (groupIndex: number) => {
         const newMember: AddressMember = { id: `am-${Date.now()}`, type: 'ip-mask', address: '192.168.1.1', mask: '255.255.255.255' };
-        const newGroups = [...config.addressGroups];
-        newGroups[groupIndex].members.push(newMember);
+        const newGroups = config.addressGroups.map((g, i) =>
+            i === groupIndex ? { ...g, members: [...g.members, newMember] } : g
+        );
         updateObjectGroups({ addressGroups: newGroups });
     };
     
     const updateMember = (groupIndex: number, memberIndex: number, updates: Partial<AddressMember>) => {
-        const newGroups = [...config.addressGroups];
-        const newMembers = [...newGroups[groupIndex].members];
-        const oldMember = newMembers[memberIndex];
-        const newMember = { ...oldMember, ...updates };
+        const newGroups = config.addressGroups.map((g, i) => {
+            if (i !== groupIndex) return g;
+            const oldMember = g.members[memberIndex];
+            const nextMember: AddressMember = { ...oldMember, ...updates } as AddressMember;
 
-        // Reset fields when type changes
-        if (oldMember.type !== newMember.type) {
-            if (newMember.type === 'ip-mask') {
-                newMember.startAddress = ''; newMember.endAddress = ''; newMember.hostName = '';
-            } else if (newMember.type === 'range') {
-                newMember.address = ''; newMember.mask = ''; newMember.hostName = '';
-            } else if (newMember.type === 'host-name') {
-                 newMember.address = ''; newMember.mask = ''; newMember.startAddress = ''; newMember.endAddress = '';
+            // Reset fields when type changes
+            if (oldMember.type !== nextMember.type) {
+                if (nextMember.type === 'ip-mask') {
+                    nextMember.startAddress = ''; nextMember.endAddress = ''; nextMember.hostName = '';
+                } else if (nextMember.type === 'range') {
+                    nextMember.address = ''; nextMember.mask = ''; nextMember.hostName = '';
+                } else if (nextMember.type === 'host-name') {
+                    nextMember.address = ''; nextMember.mask = ''; nextMember.startAddress = ''; nextMember.endAddress = '';
+                }
             }
-        }
 
-        newMembers[memberIndex] = newMember;
-        newGroups[groupIndex].members = newMembers;
+            const nextMembers = g.members.map((m, mi) => mi === memberIndex ? nextMember : m);
+            return { ...g, members: nextMembers };
+        });
         updateObjectGroups({ addressGroups: newGroups });
     };
 
     const removeMember = (groupIndex: number, memberIndex: number) => {
-        const newGroups = [...config.addressGroups];
-        newGroups[groupIndex].members = newGroups[groupIndex].members.filter((_, i) => i !== memberIndex);
+        const newGroups = config.addressGroups.map((g, i) =>
+            i === groupIndex ? { ...g, members: g.members.filter((_, mi) => mi !== memberIndex) } : g
+        );
         updateObjectGroups({ addressGroups: newGroups });
     };
 
