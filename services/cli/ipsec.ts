@@ -1,5 +1,5 @@
 
-import { Node, IPsecConfig, Vendor, DeviceType, IKEKeychain, IPsecPolicy } from '../../types';
+import { Node, IPsecConfig, Vendor, DeviceType, IKEProposal, IPsecPolicy } from '../../types';
 
 const generateH3cIpsecCli = (config: Node['config']): string => {
     const { ipsec: ipsecConfig, acl: aclConfig } = config;
@@ -17,24 +17,17 @@ const generateH3cIpsecCli = (config: Node['config']): string => {
         cli += 'quit\n\n';
     });
 
-    // 2. IKE Keychains
-    ipsecConfig.ikeKeychains.forEach(kc => {
-        if (!kc.name) return;
-        cli += `ike keychain ${kc.name}\n`;
-        kc.preSharedKeys.forEach(psk => {
-            if (psk.address && psk.key) {
-                 cli += ` pre-shared-key address ${psk.address} ${psk.mask || '0'} key simple ${psk.key}\n`;
-            }
-        });
-        cli += 'quit\n\n';
-    });
+    // 2. IKE Proposals (H3C does not have IKE proposals, skip for H3C)
 
     // 3. IKE Profiles
     ipsecConfig.ikeProfiles.forEach(prof => {
         if (!prof.name) return;
         cli += `ike profile ${prof.name}\n`;
-        const keychain = ipsecConfig.ikeKeychains.find(k => k.id === prof.keychainId);
-        if (keychain) cli += ` keychain ${keychain.name}\n`;
+        const proposal = ipsecConfig.ikeProposals.find(p => p.id === prof.proposalId);
+        if (proposal) cli += ` ike-proposal ${proposal.proposalNumber}\n`;
+        if (prof.preSharedKey && prof.preSharedKey.key) {
+            cli += ` pre-shared-key address ${prof.preSharedKey.remoteAddress} key simple ${prof.preSharedKey.key}\n`;
+        }
         if (prof.localIdentity) cli += ` local-identity ${prof.localIdentity}\n`;
         if (prof.matchRemoteAddress) cli += ` match remote identity address ${prof.matchRemoteAddress}\n`;
         cli += 'quit\n\n';
@@ -99,17 +92,39 @@ const generateHuaweiIpsecCli = (config: Node['config']): string => {
         cli += 'quit\n\n';
     });
 
-    // 2. IKE Keychain
-    ipsecConfig.ikeKeychains.forEach(kc => {
-        if (!kc.name) return;
-        cli += `ike keychain ${kc.name}\n`;
-        // Huawei keychains do not bind to an address within the keychain config
-        kc.preSharedKeys.forEach(psk => {
-            if (psk.key) {
-                // Correct Huawei command for a simple key.
-                cli += ` pre-shared-key key simple ${psk.key}\n`;
-            }
-        });
+    // 2. IKE Proposals
+    ipsecConfig.ikeProposals.forEach(prop => {
+        if (!prop.proposalNumber) return;
+        cli += `ike proposal ${prop.proposalNumber}\n`;
+        
+        // Authentication method
+        cli += ` authentication-method ${prop.authenticationMethod}\n`;
+        
+        // Authentication algorithms (IKEv1)
+        if (prop.authenticationAlgorithm.length > 0) {
+            cli += ` authentication-algorithm ${prop.authenticationAlgorithm.join(' ')}\n`;
+        }
+        
+        // Encryption algorithms
+        if (prop.encryptionAlgorithm.length > 0) {
+            cli += ` encryption-algorithm ${prop.encryptionAlgorithm.join(' ')}\n`;
+        }
+        
+        // DH groups
+        if (prop.dhGroup.length > 0) {
+            cli += ` dh ${prop.dhGroup.join(' ')}\n`;
+        }
+        
+        // PRF algorithms (IKEv2)
+        if (prop.prf && prop.prf.length > 0) {
+            cli += ` prf ${prop.prf.join(' ')}\n`;
+        }
+        
+        // Integrity algorithms (IKEv2)
+        if (prop.integrityAlgorithm && prop.integrityAlgorithm.length > 0) {
+            cli += ` integrity-algorithm ${prop.integrityAlgorithm.join(' ')}\n`;
+        }
+        
         cli += 'quit\n\n';
     });
 
@@ -117,8 +132,16 @@ const generateHuaweiIpsecCli = (config: Node['config']): string => {
     ipsecConfig.ikeProfiles.forEach(prof => {
         if (!prof.name) return;
         cli += `ike peer ${prof.name}\n`;
-        const keychain = ipsecConfig.ikeKeychains.find(k => k.id === prof.keychainId);
-        if (keychain) cli += ` pre-shared-key keychain ${keychain.name}\n`;
+        
+        // Reference IKE proposal
+        const proposal = ipsecConfig.ikeProposals.find(p => p.id === prof.proposalId);
+        if (proposal) cli += ` ike-proposal ${proposal.proposalNumber}\n`;
+        
+        // Pre-shared key for this peer
+        if (prof.preSharedKey && prof.preSharedKey.key) {
+            cli += ` pre-shared-key local name simple ${prof.preSharedKey.key}\n`;
+        }
+        
         if (prof.matchRemoteAddress) {
             // Safer parsing for address
             const remoteAddress = prof.matchRemoteAddress.split(' ')[0];
