@@ -1,6 +1,6 @@
 
 import React from 'react';
-import { DeviceType, Vendor, Port, LinkConfig, NATConfig, SecurityConfig, ObjectGroupConfig, IPsecConfig, HAConfig, GREVPNConfig, StackingConfig, LinkAggregationMember, DHCPRelayConfig, DHCPSnoopingConfig, ManagementConfig, MLAGConfig } from './types';
+import { DeviceType, Vendor, Port, LinkConfig, NATConfig, SecurityConfig, ObjectGroupConfig, IPsecConfig, HAConfig, GREVPNConfig, StackingConfig, LinkAggregationMember, DHCPRelayConfig, DHCPSnoopingConfig, ManagementConfig, MLAGConfig, IKEProposal } from './types';
 import {
   RouterIcon,
   L3SwitchIcon,
@@ -136,7 +136,7 @@ export const DEFAULT_OBJECT_GROUP_CONFIG: ObjectGroupConfig = {
 export const DEFAULT_IPSEC_CONFIG: IPsecConfig = {
     enabled: false,
     transformSets: [],
-    ikeKeychains: [],
+    ikeProposals: [],
     ikeProfiles: [],
     policies: [],
     cli: '',
