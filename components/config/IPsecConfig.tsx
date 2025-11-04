@@ -1,6 +1,6 @@
 
 import React, { useState, useCallback, useRef, useEffect } from 'react';
-import { Node, IPsecConfig, IPsecTransformSet, IKEKeychain, IKEProfile, IPsecPolicy, IKEKeychainPresharedKey, Vendor, AuthAlgorithm, EspEncryptionAlgorithm, PfsGroup } from '../../types';
+import { Node, IPsecConfig, IPsecTransformSet, IKEProposal, IKEProfile, IPsecPolicy, PreSharedKey, Vendor, AuthAlgorithm, EspEncryptionAlgorithm, PfsGroup, IKEAuthenticationMethod, IKEEncryptionAlgorithm, IKEDHGroup, IKEPRFAlgorithm, IKEIntegrityAlgorithm } from '../../types';
 import { SpinnerIcon } from '../Icons';
 
 interface IPsecConfigProps {
@@ -34,13 +34,13 @@ const IPsecConfig: React.FC<IPsecConfigProps> = ({ selectedNode, onNodeUpdate, i
     const [scrollToSection, setScrollToSection] = useState<string | null>(null);
 
     const transformSetsRef = useRef<HTMLDivElement>(null);
-    const ikeKeychainsRef = useRef<HTMLDivElement>(null);
+    const ikeProposalsRef = useRef<HTMLDivElement>(null);
     const ikeProfilesRef = useRef<HTMLDivElement>(null);
     const policiesRef = useRef<HTMLDivElement>(null);
 
     const refs: Record<string, React.RefObject<HTMLDivElement>> = {
         transformSets: transformSetsRef,
-        ikeKeychains: ikeKeychainsRef,
+        ikeProposals: ikeProposalsRef,
         ikeProfiles: ikeProfilesRef,
         policies: policiesRef,
     };
@@ -77,36 +77,28 @@ const IPsecConfig: React.FC<IPsecConfigProps> = ({ selectedNode, onNodeUpdate, i
     };
     const removeTransformSet = (index: number) => updateIpsec({ transformSets: config.transformSets.filter((_, i) => i !== index) });
 
-    const addKeychain = () => {
-        const newKeychain: IKEKeychain = { id: `kc-${Date.now()}`, name: `kc-${config.ikeKeychains.length + 1}`, preSharedKeys: [] };
-        updateIpsec({ ikeKeychains: [...config.ikeKeychains, newKeychain] });
-        toggleItem(newKeychain.id);
-        setScrollToSection('ikeKeychains');
+    const addProposal = () => {
+        const newProposal: IKEProposal = { 
+            id: `prop-${Date.now()}`, 
+            proposalNumber: `${config.ikeProposals.length + 1}`, 
+            authenticationMethod: 'pre-share',
+            authenticationAlgorithm: ['sha2-256'],
+            encryptionAlgorithm: ['aes-gcm-256'],
+            dhGroup: ['group14']
+        };
+        updateIpsec({ ikeProposals: [...config.ikeProposals, newProposal] });
+        toggleItem(newProposal.id);
+        setScrollToSection('ikeProposals');
     };
-    const updateKeychain = (index: number, updates: Partial<IKEKeychain>) => {
-        const newKeychains = [...config.ikeKeychains];
-        newKeychains[index] = { ...newKeychains[index], ...updates };
-        updateIpsec({ ikeKeychains: newKeychains });
+    const updateProposal = (index: number, updates: Partial<IKEProposal>) => {
+        const newProposals = [...config.ikeProposals];
+        newProposals[index] = { ...newProposals[index], ...updates };
+        updateIpsec({ ikeProposals: newProposals });
     };
-    const removeKeychain = (index: number) => updateIpsec({ ikeKeychains: config.ikeKeychains.filter((_, i) => i !== index) });
-    const addPresharedKey = (kcIndex: number) => {
-        const keychains = [...config.ikeKeychains];
-        keychains[kcIndex].preSharedKeys.push({id: `psk-${Date.now()}`, address: '0.0.0.0', mask: '0.0.0.0', key: 'secret-key'});
-        updateIpsec({ ikeKeychains: keychains });
-    };
-    const updatePresharedKey = (kcIndex: number, pskIndex: number, updates: Partial<IKEKeychainPresharedKey>) => {
-        const keychains = [...config.ikeKeychains];
-        keychains[kcIndex].preSharedKeys[pskIndex] = {...keychains[kcIndex].preSharedKeys[pskIndex], ...updates};
-        updateIpsec({ ikeKeychains: keychains });
-    }
-    const removePresharedKey = (kcIndex: number, pskIndex: number) => {
-        const keychains = [...config.ikeKeychains];
-        keychains[kcIndex].preSharedKeys = keychains[kcIndex].preSharedKeys.filter((_, i) => i !== pskIndex);
-        updateIpsec({ ikeKeychains: keychains });
-    }
+    const removeProposal = (index: number) => updateIpsec({ ikeProposals: config.ikeProposals.filter((_, i) => i !== index) });
 
     const addProfile = () => {
-        const newProfile: IKEProfile = { id: `ikep-${Date.now()}`, name: `ikep-${config.ikeProfiles.length + 1}`, keychainId: '', matchRemoteAddress: '' };
+        const newProfile: IKEProfile = { id: `ikep-${Date.now()}`, name: `ikep-${config.ikeProfiles.length + 1}`, proposalId: '', matchRemoteAddress: '' };
         updateIpsec({ ikeProfiles: [...config.ikeProfiles, newProfile] });
         toggleItem(newProfile.id);
         setScrollToSection('ikeProfiles');
@@ -180,25 +172,93 @@ const IPsecConfig: React.FC<IPsecConfigProps> = ({ selectedNode, onNodeUpdate, i
                         ))}
                     </Section>
 
-                    <Section ref={ikeKeychainsRef} title="IKE Keychains" onAdd={addKeychain} addLabel="Add IKE Keychain">
-                         {config.ikeKeychains.map((kc, kcIndex) => (
-                           <div key={kc.id} className="bg-slate-800/50 p-2 rounded space-y-2 text-xs">
-                                <div className="flex justify-between items-center cursor-pointer" onClick={() => toggleItem(kc.id)}>
-                                    <div className="flex items-center gap-2"><span className={`transition-transform text-slate-400 text-xs ${expandedItems[kc.id] ? 'rotate-90' : ''}`}>▶</span><Input value={kc.name} onChange={e => updateKeychain(kcIndex, { name: e.target.value })} /></div>
-                                    <button onClick={(e) => {e.stopPropagation(); removeKeychain(kcIndex)}} className="px-2 py-1 bg-red-600 text-white rounded text-xs ml-2">X</button>
+                    <Section ref={ikeProposalsRef} title="IKE Proposals (IKE安全提议)" onAdd={addProposal} addLabel="Add IKE Proposal">
+                         {config.ikeProposals.map((prop, propIndex) => (
+                           <div key={prop.id} className="bg-slate-800/50 p-2 rounded space-y-2 text-xs">
+                                <div className="flex justify-between items-center cursor-pointer" onClick={() => toggleItem(prop.id)}>
+                                    <div className="flex items-center gap-2">
+                                        <span className={`transition-transform text-slate-400 text-xs ${expandedItems[prop.id] ? 'rotate-90' : ''}`}>▶</span>
+                                        <span className="text-slate-300">Proposal {prop.proposalNumber}</span>
+                                    </div>
+                                    <button onClick={(e) => {e.stopPropagation(); removeProposal(propIndex)}} className="px-2 py-1 bg-red-600 text-white rounded text-xs ml-2">X</button>
                                 </div>
-                                {expandedItems[kc.id] && <div className="pt-2 border-t border-slate-600/50 space-y-2">
-                                    {kc.preSharedKeys.map((psk, pskIndex) => (
-                                        <div key={psk.id} className={`${vendor === Vendor.Huawei ? 'grid-cols-[1fr_auto]' : 'grid-cols-[1fr_1fr_1fr_auto]'} grid gap-2 items-end`}>
-                                            {vendor !== Vendor.Huawei && <>
-                                                <Field label="Remote Address"><Input placeholder="IP or 0.0.0.0" value={psk.address} onChange={e => updatePresharedKey(kcIndex, pskIndex, { address: e.target.value })} /></Field>
-                                                <Field label="Mask"><Input placeholder="Mask or 0" value={psk.mask} onChange={e => updatePresharedKey(kcIndex, pskIndex, { mask: e.target.value })} /></Field>
-                                            </>}
-                                            <Field label="Key"><Input type="password" value={psk.key} onChange={e => updatePresharedKey(kcIndex, pskIndex, { key: e.target.value })} /></Field>
-                                            <button onClick={() => removePresharedKey(kcIndex, pskIndex)} className="h-fit px-2 py-1 bg-red-600 text-white rounded text-xs">-</button>
+                                {expandedItems[prop.id] && <div className="pt-2 border-t border-slate-600/50 space-y-2">
+                                    <Field label="Proposal Number"><Input value={prop.proposalNumber} onChange={e => updateProposal(propIndex, { proposalNumber: e.target.value })} /></Field>
+                                    <Field label="Authentication Method">
+                                        <Select value={prop.authenticationMethod} onChange={e => updateProposal(propIndex, { authenticationMethod: e.target.value as IKEAuthenticationMethod })}>
+                                            <option value="pre-share">Pre-shared Key</option>
+                                            <option value="rsa-signature">RSA Signature</option>
+                                            {vendor === Vendor.Huawei && <option value="sm2-digital-envelope">SM2 Digital Envelope (IKEv1)</option>}
+                                            <option value="ecdsa-signature">ECDSA Signature (IKEv2)</option>
+                                        </Select>
+                                    </Field>
+                                    <Field label="Encryption Algorithm">
+                                        <div className="grid grid-cols-3 gap-1 bg-slate-700 p-1 rounded">
+                                            {(['des', '3des', 'aes-128', 'aes-192', 'aes-256', 'sm4', 'aes-gcm-128', 'aes-gcm-192', 'aes-gcm-256'] as IKEEncryptionAlgorithm[]).map(alg => (
+                                                <label key={alg} className="flex items-center gap-1 cursor-pointer p-1 rounded hover:bg-slate-600 text-xs">
+                                                    <input type="checkbox" checked={prop.encryptionAlgorithm.includes(alg)} onChange={e => {
+                                                        const newAlgs = e.target.checked ? [...prop.encryptionAlgorithm, alg] : prop.encryptionAlgorithm.filter(a => a !== alg);
+                                                        updateProposal(propIndex, { encryptionAlgorithm: newAlgs });
+                                                    }} />
+                                                    {alg}
+                                                </label>
+                                            ))}
                                         </div>
-                                    ))}
-                                    <button onClick={() => addPresharedKey(kcIndex)} className="w-full text-xs py-1 bg-green-600 rounded mt-1 text-white">+</button>
+                                    </Field>
+                                    <Field label="Authentication Algorithm (IKEv1)">
+                                        <div className="grid grid-cols-3 gap-1 bg-slate-700 p-1 rounded">
+                                            {(['md5', 'sha1', 'sha2-256', 'sha2-384', 'sha2-512', 'sm3'] as AuthAlgorithm[]).map(alg => (
+                                                <label key={alg} className="flex items-center gap-1 cursor-pointer p-1 rounded hover:bg-slate-600 text-xs">
+                                                    <input type="checkbox" checked={prop.authenticationAlgorithm.includes(alg)} onChange={e => {
+                                                        const newAlgs = e.target.checked ? [...prop.authenticationAlgorithm, alg] : prop.authenticationAlgorithm.filter(a => a !== alg);
+                                                        updateProposal(propIndex, { authenticationAlgorithm: newAlgs });
+                                                    }} />
+                                                    {alg}
+                                                </label>
+                                            ))}
+                                        </div>
+                                    </Field>
+                                    <Field label="DH Group">
+                                        <div className="grid grid-cols-4 gap-1 bg-slate-700 p-1 rounded">
+                                            {(['group1', 'group2', 'group5', 'group14', 'group15', 'group16', 'group18', 'group19', 'group20', 'group21', 'group24'] as IKEDHGroup[]).map(grp => (
+                                                <label key={grp} className="flex items-center gap-1 cursor-pointer p-1 rounded hover:bg-slate-600 text-xs">
+                                                    <input type="checkbox" checked={prop.dhGroup.includes(grp)} onChange={e => {
+                                                        const newGroups = e.target.checked ? [...prop.dhGroup, grp] : prop.dhGroup.filter(g => g !== grp);
+                                                        updateProposal(propIndex, { dhGroup: newGroups });
+                                                    }} />
+                                                    {grp}
+                                                </label>
+                                            ))}
+                                        </div>
+                                    </Field>
+                                    <Field label="PRF Algorithm (IKEv2 Optional)">
+                                        <div className="grid grid-cols-3 gap-1 bg-slate-700 p-1 rounded">
+                                            {(['aes-xcbc-128', 'hmac-md5', 'hmac-sha1', 'hmac-sha2-256', 'hmac-sha2-384', 'hmac-sha2-512'] as IKEPRFAlgorithm[]).map(prf => (
+                                                <label key={prf} className="flex items-center gap-1 cursor-pointer p-1 rounded hover:bg-slate-600 text-xs">
+                                                    <input type="checkbox" checked={prop.prf?.includes(prf) || false} onChange={e => {
+                                                        const currentPrf = prop.prf || [];
+                                                        const newPrf = e.target.checked ? [...currentPrf, prf] : currentPrf.filter(p => p !== prf);
+                                                        updateProposal(propIndex, { prf: newPrf.length > 0 ? newPrf : undefined });
+                                                    }} />
+                                                    {prf}
+                                                </label>
+                                            ))}
+                                        </div>
+                                    </Field>
+                                    <Field label="Integrity Algorithm (IKEv2 Optional)">
+                                        <div className="grid grid-cols-3 gap-1 bg-slate-700 p-1 rounded">
+                                            {(['aes-xcbc-96', 'hmac-md5-96', 'hmac-sha1-96', 'hmac-sha2-256', 'hmac-sha2-384', 'hmac-sha2-512'] as IKEIntegrityAlgorithm[]).map(integ => (
+                                                <label key={integ} className="flex items-center gap-1 cursor-pointer p-1 rounded hover:bg-slate-600 text-xs">
+                                                    <input type="checkbox" checked={prop.integrityAlgorithm?.includes(integ) || false} onChange={e => {
+                                                        const currentInteg = prop.integrityAlgorithm || [];
+                                                        const newInteg = e.target.checked ? [...currentInteg, integ] : currentInteg.filter(i => i !== integ);
+                                                        updateProposal(propIndex, { integrityAlgorithm: newInteg.length > 0 ? newInteg : undefined });
+                                                    }} />
+                                                    {integ}
+                                                </label>
+                                            ))}
+                                        </div>
+                                    </Field>
                                 </div>}
                            </div>
                         ))}
@@ -212,8 +272,20 @@ const IPsecConfig: React.FC<IPsecConfigProps> = ({ selectedNode, onNodeUpdate, i
                                    <button onClick={(e) => {e.stopPropagation(); removeProfile(index)}} className="px-2 py-1 bg-red-600 text-white rounded text-xs ml-2">X</button>
                                </div>
                                {expandedItems[p.id] && <div className="pt-2 border-t border-slate-600/50 space-y-2">
-                                   <Field label="Keychain"><Select value={p.keychainId} onChange={e => updateProfile(index, { keychainId: e.target.value})}><option value="">-- Select Keychain --</option>{config.ikeKeychains.map(kc => <option key={kc.id} value={kc.id}>{kc.name}</option>)}</Select></Field>
+                                   <Field label="IKE Proposal"><Select value={p.proposalId} onChange={e => updateProfile(index, { proposalId: e.target.value})}><option value="">-- Select IKE Proposal --</option>{config.ikeProposals.map(prop => <option key={prop.id} value={prop.id}>Proposal {prop.proposalNumber}</option>)}</Select></Field>
                                    <Field label={vendor === Vendor.Huawei ? "Remote Address" : "Match Remote Address"}><Input placeholder={vendor === Vendor.Huawei ? "e.g., 2.2.3.1" : "e.g., 2.2.3.1 255.255.255.0"} value={p.matchRemoteAddress} onChange={e => updateProfile(index, {matchRemoteAddress: e.target.value})} /></Field>
+                                   {p.preSharedKey && (
+                                       <div className="p-2 bg-slate-700/50 rounded space-y-2">
+                                           <h6 className="text-xs font-semibold text-slate-300">Pre-shared Key</h6>
+                                           {vendor === Vendor.Huawei && p.preSharedKey.localAddress && <Field label="Local Address"><Input value={p.preSharedKey.localAddress} onChange={e => updateProfile(index, { preSharedKey: {...p.preSharedKey!, localAddress: e.target.value} })} /></Field>}
+                                           <Field label="Remote Address"><Input value={p.preSharedKey.remoteAddress} onChange={e => updateProfile(index, { preSharedKey: {...p.preSharedKey!, remoteAddress: e.target.value} })} /></Field>
+                                           <Field label="Key"><Input type="password" value={p.preSharedKey.key} onChange={e => updateProfile(index, { preSharedKey: {...p.preSharedKey!, key: e.target.value} })} /></Field>
+                                           <button onClick={() => updateProfile(index, { preSharedKey: undefined })} className="w-full text-xs py-1 bg-red-600 rounded text-white">Remove Pre-shared Key</button>
+                                       </div>
+                                   )}
+                                   {!p.preSharedKey && (
+                                       <button onClick={() => updateProfile(index, { preSharedKey: { id: `psk-${Date.now()}`, remoteAddress: '', key: '' } })} className="w-full text-xs py-1 bg-green-600 rounded text-white">Add Pre-shared Key</button>
+                                   )}
                                </div>}
                            </div>
                         ))}
