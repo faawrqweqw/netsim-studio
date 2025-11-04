@@ -1,5 +1,5 @@
 
-import React, { useState, useRef, useEffect, forwardRef, useImperativeHandle, memo } from 'react';
+import React, { useState, useRef, useEffect, forwardRef, useImperativeHandle, memo, useMemo, useCallback } from 'react';
 import { Node, Connection, DeviceType } from '../types';
 import { RouterIcon, L2SwitchIcon, L3SwitchIcon, PCIcon, FirewallIcon, APIcon, ACIcon, ServerIcon, TextBoxSolidIcon, RectangleIcon, CircleIcon, RotateIcon,PrintIcon,MonitorIcon,SignalTowerIcon,CloudIcon } from './Icons';
 import { computeLabelRects } from '../utils/labelPlacer';
@@ -23,7 +23,35 @@ const NodeComponent: React.FC<DraggableNodeProps> = memo(({ node, onMove, onNode
     const [isEditing, setIsEditing] = useState(false);
     const [text, setText] = useState(node.text || '');
     const nodeRef = useRef<HTMLDivElement>(null);
-    const [nameStyle, setNameStyle] = useState<React.CSSProperties>({});
+    const nameStyle = useMemo<React.CSSProperties>(() => {
+        // Shapes and text do not use auto name placement
+        if (node.type === DeviceType.Rectangle || node.type === DeviceType.Circle || node.type === DeviceType.Text || node.type === DeviceType.Halo) {
+            return {};
+        }
+        const iconSize = node.style.iconSize;
+        const topLeftX = node.x - iconSize / 2;
+        const topLeftY = node.y - iconSize / 2;
+        if (nameRect) {
+            return {
+                position: 'absolute',
+                left: `${nameRect.x - topLeftX}px`,
+                top: `${nameRect.y - topLeftY}px`,
+                width: `${nameRect.w}px`,
+                height: `${nameRect.h}px`,
+                lineHeight: `${nameRect.h}px`,
+                textAlign: 'center',
+                transform: 'none',
+            } as React.CSSProperties;
+        }
+        const defaultOffset = iconSize / 2 + 8;
+        return {
+            position: 'absolute',
+            left: '50%',
+            top: `${defaultOffset}px`,
+            transform: 'translateX(-50%)',
+            textAlign: 'center',
+        } as React.CSSProperties;
+    }, [node, nameRect]);
 
 
     const handleMouseDown = (e: React.MouseEvent) => {
@@ -88,39 +116,6 @@ const NodeComponent: React.FC<DraggableNodeProps> = memo(({ node, onMove, onNode
         };
     }, [isDragging, isResizing, node, onMove, onNodeUpdate, canvasScale]);
 
-    useEffect(() => {
-        // Shapes and text do not use auto name placement
-        if (node.type === DeviceType.Rectangle || node.type === DeviceType.Circle || node.type === DeviceType.Text || node.type === DeviceType.Halo) return;
-
-        const iconSize = node.style.iconSize;
-        const topLeftX = node.x - iconSize / 2;
-        const topLeftY = node.y - iconSize / 2;
-
-        if (nameRect) {
-            // Convert world coords to wrapper-local absolute offsets
-            const style: React.CSSProperties = {
-                position: 'absolute',
-                left: `${nameRect.x - topLeftX}px`,
-                top: `${nameRect.y - topLeftY}px`,
-                width: `${nameRect.w}px`,
-                height: `${nameRect.h}px`,
-                lineHeight: `${nameRect.h}px`,
-                textAlign: 'center',
-                transform: 'none',
-            };
-            setNameStyle(style);
-        } else {
-            const defaultOffset = iconSize / 2 + 8;
-            const style: React.CSSProperties = {
-                position: 'absolute',
-                left: '50%',
-                top: `${defaultOffset}px`,
-                transform: 'translateX(-50%)',
-                textAlign: 'center',
-            };
-            setNameStyle(style);
-        }
-    }, [node, nameRect]);
 
     const handleTextChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => setText(e.target.value);
 
@@ -634,42 +629,83 @@ const Canvas = forwardRef<HTMLDivElement, CanvasProps>(({
     };
     const updateNode = (updatedNode: Node) => setNodes(p => p.map(n => (n.id === updatedNode.id ? updatedNode : n)));
 
-    // Throttled computation of name label rectangles
+    // Throttled computation of name label rectangles with stable reference
+    // Use serialized key to stabilize dependencies
+    const nodesKey = useMemo(() => 
+        nodes.map(n => `${n.id}:${n.x}:${n.y}:${n.name}:${n.style.iconSize}`).join('|'),
+        [nodes]
+    );
+    const connectionsKey = useMemo(() => 
+        connections.map(c => `${c.id}:${c.from.nodeId}:${c.to.nodeId}`).join('|'),
+        [connections]
+    );
+    
+    const prevRectsRef = useRef<Record<string, { x: number; y: number; w: number; h: number }>>({});
+    const updateTimeoutRef = useRef<number>();
+    
     useEffect(() => {
         const el = canvasInnerRef.current;
         if (!el) return;
-        const bounds = el.getBoundingClientRect();
-        // Convert viewport (screen) rect to world coordinates
-        const viewportWorld = {
-            x: (-canvasTranslate.x) / canvasScale,
-            y: (-canvasTranslate.y) / canvasScale,
-            w: bounds.width / canvasScale,
-            h: bounds.height / canvasScale,
-        };
-        // text measurer
-        const canvas = document.createElement('canvas');
-        const ctx = canvas.getContext('2d');
-        const fontPx = 14; // Keep consistent with UI
-        const measure = (text: string) => {
-            if (!ctx) return { w: Math.max(20, text.length * (fontPx * 0.6) + 8), h: fontPx + 6 };
-            ctx.font = `${fontPx}px system-ui, -apple-system, Segoe UI, Roboto, sans-serif`;
-            const m = ctx.measureText(text || ' ');
-            return { w: Math.max(20, Math.ceil(m.width) + 8), h: fontPx + 6 };
-        };
+        
+        // Debounce to avoid excessive recalculations
+        if (updateTimeoutRef.current) {
+            cancelAnimationFrame(updateTimeoutRef.current);
+        }
+        
+        updateTimeoutRef.current = requestAnimationFrame(() => {
+            const bounds = el.getBoundingClientRect();
+            const viewportWorld = {
+                x: (-canvasTranslate.x) / canvasScale,
+                y: (-canvasTranslate.y) / canvasScale,
+                w: bounds.width / canvasScale,
+                h: bounds.height / canvasScale,
+            };
+            
+            const canvas = document.createElement('canvas');
+            const ctx = canvas.getContext('2d');
+            const fontPx = 14;
+            const measure = (text: string) => {
+                if (!ctx) return { w: Math.max(20, text.length * (fontPx * 0.6) + 8), h: fontPx + 6 };
+                ctx.font = `${fontPx}px system-ui, -apple-system, Segoe UI, Roboto, sans-serif`;
+                const m = ctx.measureText(text || ' ');
+                return { w: Math.max(20, Math.ceil(m.width) + 8), h: fontPx + 6 };
+            };
 
-        let raf = 0;
-        const run = () => {
-            const rects = computeLabelRects(nodes, connections, { x: viewportWorld.x, y: viewportWorld.y, w: viewportWorld.w, h: viewportWorld.h }, measure, {
+            const newRects = computeLabelRects(nodes, connections, viewportWorld, measure, {
                 maxSteps: 8,
                 stepGap: 10,
                 baseGap: 8,
             });
-            setNameRects(rects);
+            
+            // Only update if actually different
+            const rectsEqual = (
+                a: Record<string, { x: number; y: number; w: number; h: number }>,
+                b: Record<string, { x: number; y: number; w: number; h: number }>
+            ) => {
+                const aKeys = Object.keys(a);
+                const bKeys = Object.keys(b);
+                if (aKeys.length !== bKeys.length) return false;
+                for (const k of aKeys) {
+                    const av = a[k];
+                    const bv = b[k];
+                    if (!bv) return false;
+                    if (av.x !== bv.x || av.y !== bv.y || av.w !== bv.w || av.h !== bv.h) return false;
+                }
+                return true;
+            };
+            
+            if (!rectsEqual(prevRectsRef.current, newRects)) {
+                prevRectsRef.current = newRects;
+                setNameRects(newRects);
+            }
+        });
+        
+        return () => {
+            if (updateTimeoutRef.current) {
+                cancelAnimationFrame(updateTimeoutRef.current);
+            }
         };
-        // Throttle with rAF
-        raf = requestAnimationFrame(run);
-        return () => cancelAnimationFrame(raf);
-    }, [nodes, connections, canvasScale, canvasTranslate]);
+    }, [nodesKey, connectionsKey, canvasScale, canvasTranslate]);
 
     const connectionGroups = connections.reduce((acc, conn) => {
         const key = [conn.from.nodeId, conn.to.nodeId].sort().join('-');
