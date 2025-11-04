@@ -1,6 +1,3 @@
-
-
-
 export enum DeviceType {
   Router = 'Router',
   L3Switch = 'L3 Switch',
@@ -968,6 +965,13 @@ export type AuthAlgorithm = 'md5' | 'sha1' | 'sha2-256' | 'sha2-384' | 'sha2-512
 export type EspEncryptionAlgorithm = 'des-cbc' | '3des-cbc' | 'aes-cbc-128' | 'aes-cbc-192' | 'aes-cbc-256' | 'sm1' | 'sm4' | 'aes-128-gcm-128' | 'aes-192-gcm-128' | 'aes-256-gcm-128' | 'aes-128-gmac' | 'aes-192-gmac' | 'aes-256-gmac';
 export type PfsGroup = 'dh-group1' | 'dh-group2' | 'dh-group5' | 'dh-group14' | 'dh-group15' | 'dh-group16' | 'dh-group18' | 'dh-group19' | 'dh-group20' | 'dh-group21' | 'dh-group24';
 
+// IKE Proposal types
+export type IKEAuthenticationMethod = 'pre-share' | 'rsa-signature' | 'sm2-digital-envelope' | 'ecdsa-signature';
+export type IKEEncryptionAlgorithm = 'des' | '3des' | 'aes-128' | 'aes-192' | 'aes-256' | 'sm4' | 'aes-gcm-128' | 'aes-gcm-192' | 'aes-gcm-256';
+export type IKEDHGroup = 'group1' | 'group2' | 'group5' | 'group14' | 'group15' | 'group16' | 'group18' | 'group19' | 'group20' | 'group21' | 'group24';
+export type IKEPRFAlgorithm = 'aes-xcbc-128' | 'hmac-md5' | 'hmac-sha1' | 'hmac-sha2-256' | 'hmac-sha2-384' | 'hmac-sha2-512';
+export type IKEIntegrityAlgorithm = 'aes-xcbc-96' | 'hmac-md5-96' | 'hmac-sha1-96' | 'hmac-sha2-256' | 'hmac-sha2-384' | 'hmac-sha2-512';
+
 export interface IPsecTransformSet {
     id: string;
     name: string;
@@ -980,23 +984,31 @@ export interface IPsecTransformSet {
 }
 
 
-export interface IKEKeychainPresharedKey {
+// IKE Proposal (安全提议)
+export interface IKEProposal {
     id: string;
-    address: string;
-    mask?: string;
-    key: string;
+    proposalNumber: string; // 提议序号
+    authenticationMethod: IKEAuthenticationMethod; // 认证方法
+    authenticationAlgorithm: AuthAlgorithm[]; // IKEv1认证算法
+    encryptionAlgorithm: IKEEncryptionAlgorithm[]; // 加密算法
+    dhGroup: IKEDHGroup[]; // DH组
+    prf?: IKEPRFAlgorithm[]; // IKEv2伪随机数函数算法
+    integrityAlgorithm?: IKEIntegrityAlgorithm[]; // IKEv2完整性算法
 }
 
-export interface IKEKeychain {
+// Pre-shared key configuration (预共享密钥)
+export interface PreSharedKey {
     id: string;
-    name: string;
-    preSharedKeys: IKEKeychainPresharedKey[];
+    localAddress?: string; // 本端地址
+    remoteAddress: string; // 对端地址
+    key: string; // 密钥
 }
 
 export interface IKEProfile {
     id: string;
     name: string;
-    keychainId: string;
+    proposalId: string; // 关联的IKE提议
+    preSharedKey?: PreSharedKey; // 预共享密钥（针对该对等体）
     matchRemoteAddress: string;
     localIdentity?: string;
 }
@@ -1029,8 +1041,8 @@ export interface IPsecPolicy {
 export interface IPsecConfig {
     enabled: boolean;
     transformSets: IPsecTransformSet[];
-    ikeKeychains: IKEKeychain[];
-    ikeProfiles: IKEProfile[];
+    ikeProposals: IKEProposal[]; // IKE安全提议
+    ikeProfiles: IKEProfile[]; // IKE对等体/Peer
     policies: IPsecPolicy[];
     cli: string;
     explanation: string;
