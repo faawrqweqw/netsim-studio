@@ -189,22 +189,40 @@ const App: React.FC = () => {
             const currentTopology = prev.topologies[prev.activeTopologyId];
             const newUpdates = typeof updates === 'function' ? updates(currentTopology) : updates;
 
-            // Deep clone nodes/connections to avoid mutation issues
-            const clonedUpdates: Partial<Topology> = {};
-            if (newUpdates.nodes) clonedUpdates.nodes = JSON.parse(JSON.stringify(newUpdates.nodes));
-            if (newUpdates.connections) clonedUpdates.connections = JSON.parse(JSON.stringify(newUpdates.connections));
-            if (newUpdates.managedDevices) clonedUpdates.managedDevices = JSON.parse(JSON.stringify(newUpdates.managedDevices));
+            // Deep comparison for arrays to avoid unnecessary updates
+            const deepEqual = (a: any, b: any): boolean => {
+                if (a === b) return true;
+                if (!a || !b) return false;
+                if (Array.isArray(a) && Array.isArray(b)) {
+                    if (a.length !== b.length) return false;
+                    return JSON.stringify(a) === JSON.stringify(b);
+                }
+                if (typeof a === 'object' && typeof b === 'object') {
+                    return JSON.stringify(a) === JSON.stringify(b);
+                }
+                return false;
+            };
 
+            // Only update if there are actual changes
+            const hasChanges = Object.keys(newUpdates).some(key => {
+                const k = key as keyof Topology;
+                return !deepEqual(newUpdates[k], currentTopology[k]);
+            });
+            
+            if (!hasChanges) {
+                return prev;
+            }
+
+            const updatedTopology = {
+                ...currentTopology,
+                ...newUpdates
+            };
 
             return {
                 ...prev,
                 topologies: {
                     ...prev.topologies,
-                    [prev.activeTopologyId]: {
-                        ...currentTopology,
-                        ...newUpdates,
-                        ...clonedUpdates // Overwrite with cloned data if present
-                    }
+                    [prev.activeTopologyId]: updatedTopology
                 }
             };
         });
@@ -228,13 +246,20 @@ const App: React.FC = () => {
 
         const debounceSave = setTimeout(() => {
             try {
-                // Remove runtime properties before saving
-                const stateToSave = { ...appState };
-                for (const topoId in stateToSave.topologies) {
-                    const topology = stateToSave.topologies[topoId];
-                    topology.nodes = topology.nodes.map(({ runtime, ...rest }) => rest);
-                    topology.managedDevices = topology.managedDevices.map(({ runtime, ...rest }) => rest);
-                }
+                // Create a deep copy without mutating appState
+                const stateToSave = {
+                    ...appState,
+                    topologies: Object.fromEntries(
+                        Object.entries(appState.topologies).map(([id, topo]) => [
+                            id,
+                            {
+                                ...topo,
+                                nodes: topo.nodes.map(({ runtime, ...rest }) => rest),
+                                managedDevices: topo.managedDevices.map(({ runtime, ...rest }) => rest),
+                            },
+                        ])
+                    )
+                };
                 const dataToSave = JSON.stringify(stateToSave);
                 localStorage.setItem('netsim-studio-app-state', dataToSave);
             } catch (error) {
