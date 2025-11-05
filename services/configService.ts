@@ -125,12 +125,14 @@ export const generateAllCliCommands = (node: Node, connections: Connection[]): s
     config.vlan.vlanInterfaces.forEach(vlan => { if (vlan.vlanId) allVlanIds.add(vlan.vlanId); });
 
     if (config.linkAggregation.enabled) {
-        const { interfaceMode, accessVlan, trunkNativeVlan, trunkAllowedVlans } = config.linkAggregation;
-        if (interfaceMode === 'access' && accessVlan) allVlanIds.add(accessVlan);
-        else if (interfaceMode === 'trunk') {
-            if (trunkNativeVlan) allVlanIds.add(trunkNativeVlan);
-            if (trunkAllowedVlans) parseVlanString(trunkAllowedVlans).forEach(id => allVlanIds.add(id.toString()));
-        }
+        (config.linkAggregation.groups || []).forEach(g => {
+            const { interfaceMode, accessVlan, trunkNativeVlan, trunkAllowedVlans } = g;
+            if (interfaceMode === 'access' && accessVlan) allVlanIds.add(accessVlan);
+            else if (interfaceMode === 'trunk') {
+                if (trunkNativeVlan) allVlanIds.add(trunkNativeVlan);
+                if (trunkAllowedVlans) parseVlanString(trunkAllowedVlans).forEach(id => allVlanIds.add(id.toString()));
+            }
+        });
     }
     
     connections.forEach(conn => {
@@ -291,7 +293,7 @@ export const generateAllCliCommands = (node: Node, connections: Connection[]): s
         }
         
         if (portName) {
-            const isPortInAggregation = node.config.linkAggregation.enabled && node.config.linkAggregation.members.some(m => m.name === portName);
+            const isPortInAggregation = node.config.linkAggregation.enabled && (node.config.linkAggregation.groups || []).some(g => g.members.some(m => m.name === portName));
             if (!isPortInAggregation) {
                 const cli = generateInterfaceCli(portName, vendor, conn.config, type);
                 if (cli) {
