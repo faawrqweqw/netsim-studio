@@ -4,7 +4,8 @@ import { ManagedDevice, Vendor, DeviceType } from '../types';
 import { DEFAULT_MANAGEMENT_CONFIG } from '../constants';
 import DeviceFormModal from './DeviceFormModal';
 
-const API_BASE_URL = 'http://localhost:3001/api';
+// 使用相对路径，支持部署到服务器
+const API_BASE_URL = '/api';
 
 interface EnhancedDeviceManagementProps {
     devices: ManagedDevice[];
@@ -25,8 +26,9 @@ const EnhancedDeviceManagement: React.FC<EnhancedDeviceManagementProps> = ({ dev
     const [selectedGroup, setSelectedGroup] = useState<string>('all');
     const [showImportModal, setShowImportModal] = useState(false);
     const [message, setMessage] = useState<Message | null>(null);
-    const [formData, setFormData] = useState<Omit<ManagedDevice, 'id' | 'type' | 'vendor'>>({
+    const [formData, setFormData] = useState<Omit<ManagedDevice, 'id' | 'type'>>({
         name: '',
+        vendor: Vendor.Huawei,
         management: { ipAddress: '', port: 22, username: '', password: '' },
         group: 'default',
         config: {},
@@ -52,6 +54,7 @@ const EnhancedDeviceManagement: React.FC<EnhancedDeviceManagementProps> = ({ dev
         setEditingDevice(device);
         setFormData({
             name: device.name,
+            vendor: device.vendor,
             management: device.management,
             group: device.group || 'default',
             config: device.config,
@@ -267,6 +270,7 @@ const EnhancedDeviceManagement: React.FC<EnhancedDeviceManagementProps> = ({ dev
     const resetForm = () => {
         setFormData({
             name: '',
+            vendor: Vendor.Huawei,
             management: { ipAddress: '', port: 22, username: '', password: '' },
             group: 'default',
             config: {},
@@ -372,6 +376,7 @@ const EnhancedDeviceManagement: React.FC<EnhancedDeviceManagementProps> = ({ dev
                             const updatedDevice: ManagedDevice = {
                                 ...editingDevice,
                                 name: formData.name,
+                                vendor: formData.vendor,
                                 management: formData.management,
                                 group: formData.group,
                                 config: formData.config,
@@ -382,7 +387,7 @@ const EnhancedDeviceManagement: React.FC<EnhancedDeviceManagementProps> = ({ dev
                             const newDevice: ManagedDevice = {
                                 id: '',
                                 name: formData.name,
-                                vendor: Vendor.Huawei,
+                                vendor: formData.vendor,
                                 type: DeviceType.Switch,
                                 management: formData.management,
                                 group: formData.group,
@@ -434,6 +439,20 @@ const EnhancedDeviceManagement: React.FC<EnhancedDeviceManagementProps> = ({ dev
                                 required
                                 className="w-full bg-slate-700 border border-slate-600 rounded-md px-3 py-2 text-white"
                             />
+                        </div>
+                        <div>
+                            <label className="block text-sm font-medium text-slate-300 mb-1">厂商</label>
+                            <select
+                                value={formData.vendor}
+                                onChange={(e) => setFormData({ ...formData, vendor: e.target.value as Vendor })}
+                                required
+                                className="w-full bg-slate-700 border border-slate-600 rounded-md px-3 py-2 text-white"
+                            >
+                                <option value={Vendor.Huawei}>华为 (Huawei)</option>
+                                <option value={Vendor.Cisco}>思科 (Cisco)</option>
+                                <option value={Vendor.H3C}>华三 (H3C)</option>
+                                <option value={Vendor.Ruijie}>锐捷 (Ruijie)</option>
+                            </select>
                         </div>
                         <div>
                             <label className="block text-sm font-medium text-slate-300 mb-1">用户名</label>
