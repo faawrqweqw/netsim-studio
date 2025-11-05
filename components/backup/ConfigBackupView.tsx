@@ -39,7 +39,7 @@ const ConfigBackupView: React.FC<ConfigBackupViewProps> = ({ managedDevices = []
   const renderView = () => {
     switch (activeView) {
       case 'history':
-        return <BackupHistoryView onCompare={handleCompare} />;
+        return <BackupHistoryView onCompare={handleCompare} managedDevices={managedDevices} />;
       case 'diff':
         return (
           <DiffViewerView
@@ -51,7 +51,7 @@ const ConfigBackupView: React.FC<ConfigBackupViewProps> = ({ managedDevices = []
       case 'scheduler':
         return <SchedulerView managedDevices={managedDevices} />;
       default:
-        return <BackupHistoryView onCompare={handleCompare} />;
+        return <BackupHistoryView onCompare={handleCompare} managedDevices={managedDevices} />;
     }
   };
 
