@@ -1,7 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
+import { ManagedDevice } from '../../types';
 
-const API_BASE_URL = 'http://localhost:3001/api';
+// 使用相对路径，支持部署到服务器
+const API_BASE_URL = '/api';
 
 interface Device {
   id: string;
@@ -19,9 +21,10 @@ interface Backup {
 
 interface BackupHistoryViewProps {
   onCompare: (backup1: Backup, backup2: Backup) => void;
+  managedDevices?: ManagedDevice[];
 }
 
-const BackupHistoryView: React.FC<BackupHistoryViewProps> = ({ onCompare }) => {
+const BackupHistoryView: React.FC<BackupHistoryViewProps> = ({ onCompare, managedDevices = [] }) => {
   const [devices, setDevices] = useState<Device[]>([]);
   const [selectedDevice, setSelectedDevice] = useState<Device | null>(null);
   const [backups, setBackups] = useState<Backup[]>([]);
@@ -31,13 +34,16 @@ const BackupHistoryView: React.FC<BackupHistoryViewProps> = ({ onCompare }) => {
 
   useEffect(() => {
     loadDevices();
-  }, []);
+  }, [managedDevices]);
 
   const loadDevices = () => {
-    const savedDevices = localStorage.getItem('backup-devices');
-    if (savedDevices) {
-      setDevices(JSON.parse(savedDevices));
-    }
+    // 从 props 中的 managedDevices 转换为 Device 格式
+    const devicesList: Device[] = managedDevices.map(d => ({
+      id: d.id,
+      name: d.name,
+      ip: d.management.ipAddress
+    }));
+    setDevices(devicesList);
   };
 
   const handleDeviceSelect = async (deviceId: string) => {
