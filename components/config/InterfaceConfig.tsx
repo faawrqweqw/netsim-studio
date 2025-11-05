@@ -77,35 +77,30 @@ const InterfaceConfig: React.FC<InterfaceConfigProps> = ({ selectedNode, onNodeU
     const isApplicable = selectedNode.type === DeviceType.Router || selectedNode.type === DeviceType.Firewall;
 
     const configuredInterfaceNames = new Set(config.interfaces.map(i => i.interfaceName));
-    const lagMemberNames = new Set(selectedNode.config.linkAggregation.members.map(m => m.name));
+    const lagMemberNames = new Set((selectedNode.config.linkAggregation.groups || []).flatMap(g => g.members.map(m => m.name)));
 
     const allAvailableInterfaces = useMemo(() => {
         const interfaces: Port[] = [...selectedNode.ports];
-        let aggInterface: Port | null = null;
+        const aggInterfaces: Port[] = [];
 
-        if (linkAggregation.enabled && linkAggregation.interfaceMode === 'l3' && (selectedNode.type === DeviceType.Router || selectedNode.type === DeviceType.Firewall)) {
-            const { vendor } = selectedNode;
-            const { groupId } = linkAggregation;
-            let aggInterfaceName = '';
-            if (vendor === Vendor.Cisco) {
-                aggInterfaceName = `Port-channel${groupId}`;
-            } else if (vendor === Vendor.Huawei) {
-                aggInterfaceName = `Eth-Trunk${groupId}`;
-            } else if (vendor === Vendor.H3C) {
-                aggInterfaceName = `Route-Aggregation${groupId}`;
-            }
-            
-            if (aggInterfaceName) {
-                aggInterface = {
-                    id: `agg-l3-${groupId}`,
-                    name: aggInterfaceName,
-                    status: 'available' 
-                };
-            }
+        if (linkAggregation.enabled && (selectedNode.type === DeviceType.Router || selectedNode.type === DeviceType.Firewall)) {
+            (linkAggregation.groups || []).forEach(g => {
+                if (g.interfaceMode === 'l3') {
+                    const groupId = g.groupId;
+                    let aggInterfaceName = '';
+                    const vendor = selectedNode.vendor;
+                    if (vendor === Vendor.Cisco) aggInterfaceName = `Port-channel${groupId}`;
+                    else if (vendor === Vendor.Huawei) aggInterfaceName = `Eth-Trunk${groupId}`;
+                    else if (vendor === Vendor.H3C) aggInterfaceName = `Route-Aggregation${groupId}`;
+                    if (aggInterfaceName) {
+                        aggInterfaces.push({ id: `agg-l3-${groupId}`, name: aggInterfaceName, status: 'available' });
+                    }
+                }
+            });
         }
         
-        if (aggInterface) {
-            return [aggInterface, ...interfaces];
+        if (aggInterfaces.length > 0) {
+            return [...aggInterfaces, ...interfaces];
         }
         
         return interfaces;
