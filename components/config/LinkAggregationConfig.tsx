@@ -138,10 +138,31 @@ const LinkAggregationConfig: React.FC<LinkAggregationConfigProps> = ({ selectedN
     }, [selectedNode, onNodeUpdate]);
 
     const updateGroup = useCallback((index: number, updates: any) => {
-        const groups = [...config.groups];
+        const groups = [...(config.groups || [])];
         groups[index] = { ...groups[index], ...updates };
         updateConfig({ groups });
     }, [config.groups, updateConfig]);
+
+    const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set((config.groups || []).map(g => g.id)));
+    React.useEffect(() => {
+        const ids = new Set((config.groups || []).map(g => g.id));
+        // Keep only existing ids, add any new ones
+        setExpandedGroups(prev => {
+            const next = new Set<string>();
+            ids.forEach(id => { if (prev.has(id)) next.add(id); });
+            // If none expanded, expand the first by default
+            if (next.size === 0 && (config.groups || []).length > 0) next.add((config.groups || [])[0].id);
+            return next;
+        });
+    }, [config.groups]);
+
+    const toggleGroupExpand = (id: string) => {
+        setExpandedGroups(prev => {
+            const next = new Set(prev);
+            if (next.has(id)) next.delete(id); else next.add(id);
+            return next;
+        });
+    };
 
     const addGroup = useCallback(() => {
         const defaultMode = selectedNode.vendor === Vendor.Huawei ? 'lacp-static' : (selectedNode.vendor === Vendor.H3C ? 'dynamic' : 'active');
@@ -164,10 +185,13 @@ const LinkAggregationConfig: React.FC<LinkAggregationConfigProps> = ({ selectedN
             huaweiLacpPriorityMode: 'default' as const,
         };
         updateConfig({ groups: [...groups, newGroup] });
+        setExpandedGroups(prev => new Set(prev).add(newGroup.id));
     }, [config.groups, selectedNode.vendor, vendorOptions.loadBalanceOptions, updateConfig]);
 
     const removeGroup = useCallback((index: number) => {
-        updateConfig({ groups: config.groups.filter((_, i) => i !== index) });
+        const toRemove = (config.groups || [])[index]?.id;
+        updateConfig({ groups: (config.groups || []).filter((_, i) => i !== index) });
+        if (toRemove) setExpandedGroups(prev => { const next = new Set(prev); next.delete(toRemove); return next; });
     }, [config.groups, updateConfig]);
 
     const availablePorts = useMemo(() => selectedNode.ports.filter(p => p.status === 'connected'), [selectedNode.ports]);
@@ -261,94 +285,101 @@ const LinkAggregationConfig: React.FC<LinkAggregationConfigProps> = ({ selectedN
                         return (
                             <div key={group.id} className="p-3 bg-slate-800/50 rounded-lg space-y-3">
                                 <div className="flex justify-between items-center">
-                                    <h5 className="text-sm font-medium text-slate-300">聚合口 {group.groupId}</h5>
+                                    <button className="flex items-center gap-2" onClick={() => toggleGroupExpand(group.id)}>
+                                        <span className={`transition-transform text-slate-400 ${expandedGroups.has(group.id) ? 'rotate-90' : ''}`}>▶</span>
+                                        <h5 className="text-sm font-medium text-slate-300">聚合口 {group.groupId}</h5>
+                                    </button>
                                     <button onClick={() => removeGroup(gIndex)} className="px-2 py-1 bg-red-600 hover:bg-red-700 text-white text-xs rounded">删除聚合口</button>
                                 </div>
-                                <div className="grid grid-cols-2 gap-3">
-                                    <Field label="Group ID"><Input type="text" value={group.groupId} onChange={e => updateGroup(gIndex, { groupId: e.target.value })} /></Field>
-                                    <Field label="Mode"><Select value={group.mode} onChange={e => updateGroup(gIndex, { mode: e.target.value })}>{vendorOptions.modeOptions.map(opt => <option key={opt.value} value={opt.value}>{opt.label}</option>)}</Select></Field>
-                                </div>
-                                <Field label="Description"><Input placeholder="e.g., Link to Core Switch" value={group.description} onChange={e => updateGroup(gIndex, { description: e.target.value })} /></Field>
-                                <Field label="Load Balance Algorithm"><Select value={group.loadBalanceAlgorithm} onChange={e => updateGroup(gIndex, { loadBalanceAlgorithm: e.target.value })}>{vendorOptions.loadBalanceOptions.map(opt => <option key={opt.value} value={opt.value}>{opt.label}</option>)}</Select></Field>
-
-                                {isDynamicMode(group.mode) && (
-                                    <div className="pt-3 border-t border-slate-700/50 space-y-3">
-                                        <h6 className="text-xs font-semibold text-slate-300">LACP System Settings</h6>
-                                        {selectedNode.vendor === Vendor.Huawei && (
-                                            <Field label="Priority Command Mode">
-                                                <Select value={group.huaweiLacpPriorityMode || 'default'} onChange={e => updateGroup(gIndex, { huaweiLacpPriorityMode: e.target.value as any })}>
-                                                    <option value="default">Default (lacp priority ...)</option>
-                                                    <option value="system-priority">System Priority (lacp system-priority ...)</option>
-                                                </Select>
-                                            </Field>
-                                        )}
-                                        <Field label="System Priority"><Input type="text" value={group.systemPriority} onChange={e => updateGroup(gIndex, { systemPriority: e.target.value })} /></Field>
-                                    </div>
-                                )}
-
-                                {selectedNode.vendor === Vendor.Huawei && group.mode === 'lacp-static' && (
-                                    <div className="pt-3 border-t border-slate-700/50 space-y-3">
-                                        <h6 className="text-xs font-semibold text-slate-300">Huawei LACP Settings</h6>
+                                {expandedGroups.has(group.id) && (
+                                    <>
                                         <div className="grid grid-cols-2 gap-3">
-                                            <Field label="Timeout"><Select value={group.timeout} onChange={e => updateGroup(gIndex, { timeout: e.target.value as any })}><option value="slow">Slow (90s)</option><option value="fast">Fast (3s)</option></Select></Field>
-                                            <Field label="Preempt Delay (s)"><Input type="text" value={group.preemptDelay} onChange={e => updateGroup(gIndex, { preemptDelay: e.target.value })} disabled={!group.preemptEnabled} /></Field>
+                                            <Field label="Group ID"><Input type="text" value={group.groupId} onChange={e => updateGroup(gIndex, { groupId: e.target.value })} /></Field>
+                                            <Field label="Mode"><Select value={group.mode} onChange={e => updateGroup(gIndex, { mode: e.target.value })}>{vendorOptions.modeOptions.map(opt => <option key={opt.value} value={opt.value}>{opt.label}</option>)}</Select></Field>
                                         </div>
-                                        <Checkbox label="Enable Preemption" checked={!!group.preemptEnabled} onChange={e => updateGroup(gIndex, { preemptEnabled: e.target.checked })} />
-                                    </div>
+                                        <Field label="Description"><Input placeholder="e.g., Link to Core Switch" value={group.description} onChange={e => updateGroup(gIndex, { description: e.target.value })} /></Field>
+                                        <Field label="Load Balance Algorithm"><Select value={group.loadBalanceAlgorithm} onChange={e => updateGroup(gIndex, { loadBalanceAlgorithm: e.target.value })}>{vendorOptions.loadBalanceOptions.map(opt => <option key={opt.value} value={opt.value}>{opt.label}</option>)}</Select></Field>
+
+                                        {isDynamicMode(group.mode) && (
+                                            <div className="pt-3 border-t border-slate-700/50 space-y-3">
+                                                <h6 className="text-xs font-semibold text-slate-300">LACP System Settings</h6>
+                                                {selectedNode.vendor === Vendor.Huawei && (
+                                                    <Field label="Priority Command Mode">
+                                                        <Select value={group.huaweiLacpPriorityMode || 'default'} onChange={e => updateGroup(gIndex, { huaweiLacpPriorityMode: e.target.value as any })}>
+                                                            <option value="default">Default (lacp priority ...)</option>
+                                                            <option value="system-priority">System Priority (lacp system-priority ...)</option>
+                                                        </Select>
+                                                    </Field>
+                                                )}
+                                                <Field label="System Priority"><Input type="text" value={group.systemPriority} onChange={e => updateGroup(gIndex, { systemPriority: e.target.value })} /></Field>
+                                            </div>
+                                        )}
+
+                                        {selectedNode.vendor === Vendor.Huawei && group.mode === 'lacp-static' && (
+                                            <div className="pt-3 border-t border-slate-700/50 space-y-3">
+                                                <h6 className="text-xs font-semibold text-slate-300">Huawei LACP Settings</h6>
+                                                <div className="grid grid-cols-2 gap-3">
+                                                    <Field label="Timeout"><Select value={group.timeout} onChange={e => updateGroup(gIndex, { timeout: e.target.value as any })}><option value="slow">Slow (90s)</option><option value="fast">Fast (3s)</option></Select></Field>
+                                                    <Field label="Preempt Delay (s)"><Input type="text" value={group.preemptDelay} onChange={e => updateGroup(gIndex, { preemptDelay: e.target.value })} disabled={!group.preemptEnabled} /></Field>
+                                                </div>
+                                                <Checkbox label="Enable Preemption" checked={!!group.preemptEnabled} onChange={e => updateGroup(gIndex, { preemptEnabled: e.target.checked })} />
+                                            </div>
+                                        )}
+
+                                        <div className="pt-3 border-t border-slate-700/50 space-y-3">
+                                            <div className="flex justify-between items-center"><h6 className="text-xs font-semibold text-slate-300">成员接口</h6><div className="flex items-center gap-2"><button onClick={() => autoDetectMembers(gIndex)} className="px-2 py-1 bg-blue-600 hover:bg-blue-700 text-white text-xs rounded">自动识别</button><button onClick={() => addMember(gIndex)} className="px-2 py-1 bg-green-600 hover:bg-green-700 text-white text-xs rounded">添加接口</button></div></div>
+                                            <div className="overflow-x-auto">
+                                                <table className="w-full text-left text-xs">
+                                                    <thead>
+                                                        <tr className="border-b border-slate-700 text-slate-400">
+                                                            <th className="py-2 pr-2">接口</th>
+                                                            {isDynamicMode(group.mode) && (selectedNode.vendor === Vendor.Huawei || selectedNode.vendor === Vendor.H3C) && <th className="py-2 px-2">端口优先级</th>}
+                                                            {isDynamicMode(group.mode) && selectedNode.vendor === Vendor.H3C && <th className="py-2 px-2">LACP 模式</th>}
+                                                            {isDynamicMode(group.mode) && selectedNode.vendor === Vendor.H3C && <th className="py-2 px-2">LACP 超时</th>}
+                                                            <th className="py-2 pl-2 w-12 text-right">操作</th>
+                                                        </tr>
+                                                    </thead>
+                                                    <tbody>
+                                                        {group.members.map((member, index) => (
+                                                            <tr key={member.id} className="border-b border-slate-700/50">
+                                                                <td className="py-2 pr-2">
+                                                                    <Select value={member.name} onChange={e => updateMember(gIndex, index, { name: e.target.value })}>
+                                                                        <option value="">-- 选择接口 --</option>
+                                                                        {availablePorts.map(p => {
+                                                                            const taken = usedPortsAcrossGroups.has(p.name) && p.name !== member.name;
+                                                                            const takenInGroup = configuredMemberPorts.has(p.name) && p.name !== member.name;
+                                                                            return <option key={p.id} value={p.name} disabled={taken || takenInGroup}>{p.name}</option>;
+                                                                        })}
+                                                                    </Select>
+                                                                </td>
+                                                                {isDynamicMode(group.mode) && (selectedNode.vendor === Vendor.Huawei || selectedNode.vendor === Vendor.H3C) && <td className="py-2 px-2"><Input type="text" value={member.portPriority} onChange={e => updateMember(gIndex, index, { portPriority: e.target.value })} /></td>}
+                                                                {isDynamicMode(group.mode) && selectedNode.vendor === Vendor.H3C && <td className="py-2 px-2"><Select value={member.lacpMode} onChange={e => updateMember(gIndex, index, { lacpMode: e.target.value as any })}><option value="active">Active</option><option value="passive">Passive</option></Select></td>}
+                                                                {isDynamicMode(group.mode) && selectedNode.vendor === Vendor.H3C && <td className="py-2 px-2"><Select value={member.lacpPeriod} onChange={e => updateMember(gIndex, index, { lacpPeriod: e.target.value as any })}><option value="long">Long (90s)</option><option value="short">Short (3s)</option></Select></td>}
+                                                                <td className="py-2 pl-2 text-right"><button onClick={() => removeMember(gIndex, index)} className="px-2 py-1 bg-red-600 hover:bg-red-700 text-white text-xs rounded">删除</button></td>
+                                                            </tr>
+                                                        ))}
+                                                    </tbody>
+                                                </table>
+                                            </div>
+                                        </div>
+
+                                        <div className="p-3 bg-slate-900/30 rounded-lg space-y-3">
+                                            <h6 className="text-xs font-semibold text-slate-300">聚合口模式</h6>
+                                            <div className="grid grid-cols-3 gap-2">
+                                                <button onClick={() => updateGroup(gIndex, { interfaceMode: group.interfaceMode === 'access' ? 'unconfigured' : 'access' })} className={`px-2 py-1 text-xs rounded ${group.interfaceMode === 'access' ? 'bg-blue-600 text-white' : 'border border-blue-500 text-blue-300'}`}>Access</button>
+                                                <button onClick={() => updateGroup(gIndex, { interfaceMode: group.interfaceMode === 'trunk' ? 'unconfigured' : 'trunk' })} className={`px-2 py-1 text-xs rounded ${group.interfaceMode === 'trunk' ? 'bg-blue-600 text-white' : 'border border-blue-500 text-blue-300'}`}>Trunk</button>
+                                                <button onClick={() => updateGroup(gIndex, { interfaceMode: group.interfaceMode === 'l3' ? 'unconfigured' : 'l3' })} className={`px-2 py-1 text-xs rounded ${group.interfaceMode === 'l3' ? 'bg-blue-600 text-white' : 'border border-blue-500 text-blue-300'}`}>三层</button>
+                                            </div>
+                                            {group.interfaceMode === 'access' && <Field label={selectedNode.vendor === Vendor.Huawei ? 'Default VLAN' : 'VLAN ID'}><Input type="text" placeholder="e.g., 10" value={group.accessVlan} onChange={e => updateGroup(gIndex, { accessVlan: e.target.value })} /></Field>}
+                                            {group.interfaceMode === 'trunk' && (
+                                                <div className="space-y-2">
+                                                    <Field label={selectedNode.vendor === Vendor.Cisco ? 'Native VLAN' : 'PVID'}><Input type="text" placeholder="e.g., 1" value={group.trunkNativeVlan} onChange={e => updateGroup(gIndex, { trunkNativeVlan: e.target.value })} /></Field>
+                                                    <Field label="Allowed VLANs"><Input type="text" placeholder="e.g., 10,20,30-40" value={group.trunkAllowedVlans} onChange={e => updateGroup(gIndex, { trunkAllowedVlans: e.target.value })} /></Field>
+                                                </div>
+                                            )}
+                                        </div>
+                                    </>
                                 )}
-
-                                <div className="pt-3 border-t border-slate-700/50 space-y-3">
-                                    <div className="flex justify-between items-center"><h6 className="text-xs font-semibold text-slate-300">成员接口</h6><div className="flex items-center gap-2"><button onClick={() => autoDetectMembers(gIndex)} className="px-2 py-1 bg-blue-600 hover:bg-blue-700 text-white text-xs rounded">自动识别</button><button onClick={() => addMember(gIndex)} className="px-2 py-1 bg-green-600 hover:bg-green-700 text-white text-xs rounded">添加接口</button></div></div>
-                                    <div className="overflow-x-auto">
-                                        <table className="w-full text-left text-xs">
-                                            <thead>
-                                                <tr className="border-b border-slate-700 text-slate-400">
-                                                    <th className="py-2 pr-2">接口</th>
-                                                    {isDynamicMode(group.mode) && (selectedNode.vendor === Vendor.Huawei || selectedNode.vendor === Vendor.H3C) && <th className="py-2 px-2">端口优先级</th>}
-                                                    {isDynamicMode(group.mode) && selectedNode.vendor === Vendor.H3C && <th className="py-2 px-2">LACP 模式</th>}
-                                                    {isDynamicMode(group.mode) && selectedNode.vendor === Vendor.H3C && <th className="py-2 px-2">LACP 超时</th>}
-                                                    <th className="py-2 pl-2 w-12 text-right">操作</th>
-                                                </tr>
-                                            </thead>
-                                            <tbody>
-                                                {group.members.map((member, index) => (
-                                                    <tr key={member.id} className="border-b border-slate-700/50">
-                                                        <td className="py-2 pr-2">
-                                                            <Select value={member.name} onChange={e => updateMember(gIndex, index, { name: e.target.value })}>
-                                                                <option value="">-- 选择接口 --</option>
-                                                                {availablePorts.map(p => {
-                                                                    const taken = usedPortsAcrossGroups.has(p.name) && p.name !== member.name;
-                                                                    const takenInGroup = configuredMemberPorts.has(p.name) && p.name !== member.name;
-                                                                    return <option key={p.id} value={p.name} disabled={taken || takenInGroup}>{p.name}</option>;
-                                                                })}
-                                                            </Select>
-                                                        </td>
-                                                        {isDynamicMode(group.mode) && (selectedNode.vendor === Vendor.Huawei || selectedNode.vendor === Vendor.H3C) && <td className="py-2 px-2"><Input type="text" value={member.portPriority} onChange={e => updateMember(gIndex, index, { portPriority: e.target.value })} /></td>}
-                                                        {isDynamicMode(group.mode) && selectedNode.vendor === Vendor.H3C && <td className="py-2 px-2"><Select value={member.lacpMode} onChange={e => updateMember(gIndex, index, { lacpMode: e.target.value as any })}><option value="active">Active</option><option value="passive">Passive</option></Select></td>}
-                                                        {isDynamicMode(group.mode) && selectedNode.vendor === Vendor.H3C && <td className="py-2 px-2"><Select value={member.lacpPeriod} onChange={e => updateMember(gIndex, index, { lacpPeriod: e.target.value as any })}><option value="long">Long (90s)</option><option value="short">Short (3s)</option></Select></td>}
-                                                        <td className="py-2 pl-2 text-right"><button onClick={() => removeMember(gIndex, index)} className="px-2 py-1 bg-red-600 hover:bg-red-700 text-white text-xs rounded">删除</button></td>
-                                                    </tr>
-                                                ))}
-                                            </tbody>
-                                        </table>
-                                    </div>
-                                </div>
-
-                                <div className="p-3 bg-slate-900/30 rounded-lg space-y-3">
-                                    <h6 className="text-xs font-semibold text-slate-300">聚合口模式</h6>
-                                    <div className="grid grid-cols-3 gap-2">
-                                        <button onClick={() => updateGroup(gIndex, { interfaceMode: group.interfaceMode === 'access' ? 'unconfigured' : 'access' })} className={`px-2 py-1 text-xs rounded ${group.interfaceMode === 'access' ? 'bg-blue-600 text-white' : 'border border-blue-500 text-blue-300'}`}>Access</button>
-                                        <button onClick={() => updateGroup(gIndex, { interfaceMode: group.interfaceMode === 'trunk' ? 'unconfigured' : 'trunk' })} className={`px-2 py-1 text-xs rounded ${group.interfaceMode === 'trunk' ? 'bg-blue-600 text-white' : 'border border-blue-500 text-blue-300'}`}>Trunk</button>
-                                        <button onClick={() => updateGroup(gIndex, { interfaceMode: group.interfaceMode === 'l3' ? 'unconfigured' : 'l3' })} className={`px-2 py-1 text-xs rounded ${group.interfaceMode === 'l3' ? 'bg-blue-600 text-white' : 'border border-blue-500 text-blue-300'}`}>三层</button>
-                                    </div>
-                                    {group.interfaceMode === 'access' && <Field label={selectedNode.vendor === Vendor.Huawei ? 'Default VLAN' : 'VLAN ID'}><Input type="text" placeholder="e.g., 10" value={group.accessVlan} onChange={e => updateGroup(gIndex, { accessVlan: e.target.value })} /></Field>}
-                                    {group.interfaceMode === 'trunk' && (
-                                        <div className="space-y-2">
-                                            <Field label={selectedNode.vendor === Vendor.Cisco ? 'Native VLAN' : 'PVID'}><Input type="text" placeholder="e.g., 1" value={group.trunkNativeVlan} onChange={e => updateGroup(gIndex, { trunkNativeVlan: e.target.value })} /></Field>
-                                            <Field label="Allowed VLANs"><Input type="text" placeholder="e.g., 10,20,30-40" value={group.trunkAllowedVlans} onChange={e => updateGroup(gIndex, { trunkAllowedVlans: e.target.value })} /></Field>
-                                        </div>
-                                    )}
-                                </div>
                             </div>
                         );
                     })}
