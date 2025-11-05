@@ -1,3 +1,6 @@
+
+
+
 export enum DeviceType {
   Router = 'Router',
   L3Switch = 'L3 Switch',
@@ -164,24 +167,29 @@ export interface LinkAggregationMember {
     portPriority?: string;
 }
 
-export interface LinkAggregationConfig {
-  enabled: boolean;
+export interface LinkAggregationGroup {
+  id: string; // UI key
   groupId: string;
-  mode: string; // 改为string以支持不同厂商的模式
+  mode: string; // 各厂商模式值
   members: LinkAggregationMember[];
   systemPriority?: string; // H3C & Huawei
-  loadBalanceAlgorithm: string; // 改为string以支持不同厂商的算法
+  loadBalanceAlgorithm: string; // 各厂商算法值
   description: string;
-  // 聚合口VLAN配置
+  // 聚合口VLAN/三层配置
   interfaceMode: 'unconfigured' | 'access' | 'trunk' | 'l3';
   accessVlan: string;
   trunkNativeVlan: string;
   trunkAllowedVlans: string;
-   // Huawei specific
+  // Huawei specific
   preemptEnabled?: boolean;
   preemptDelay?: string;
   timeout?: 'fast' | 'slow';
   huaweiLacpPriorityMode?: 'default' | 'system-priority';
+}
+
+export interface LinkAggregationConfig {
+  enabled: boolean;
+  groups: LinkAggregationGroup[];
   cli: string;
   explanation: string;
 }
