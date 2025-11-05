@@ -70,14 +70,16 @@ const STPConfig: React.FC<STPConfigProps> = ({ selectedNode, onNodeUpdate, isExp
         const getAvailableStpInterfaces = () => {
             const interfaces = [];
             if (selectedNode.config.linkAggregation.enabled) {
-                const groupId = selectedNode.config.linkAggregation.groupId;
-                let aggregationInterface = '';
-                if (selectedNode.vendor === Vendor.Cisco) aggregationInterface = `Port-channel${groupId}`;
-                else if (selectedNode.vendor === Vendor.Huawei) aggregationInterface = `Eth-Trunk${groupId}`;
-                else if (selectedNode.vendor === Vendor.H3C) aggregationInterface = `Bridge-Aggregation${groupId}`;
-                if (aggregationInterface) interfaces.push(aggregationInterface);
+                (selectedNode.config.linkAggregation.groups || []).forEach(g => {
+                    const groupId = g.groupId;
+                    let aggregationInterface = '';
+                    if (selectedNode.vendor === Vendor.Cisco) aggregationInterface = `Port-channel${groupId}`;
+                    else if (selectedNode.vendor === Vendor.Huawei) aggregationInterface = `Eth-Trunk${groupId}`;
+                    else if (selectedNode.vendor === Vendor.H3C) aggregationInterface = `Bridge-Aggregation${groupId}`;
+                    if (aggregationInterface) interfaces.push(aggregationInterface);
+                });
             }
-            const aggregationMembers = selectedNode.config.linkAggregation.enabled ? selectedNode.config.linkAggregation.members.map(m => m.name) : [];
+            const aggregationMembers = selectedNode.config.linkAggregation.enabled ? (selectedNode.config.linkAggregation.groups || []).flatMap(g => g.members.map(m => m.name)) : [];
             selectedNode.ports.forEach(port => {
                 if (port.status === 'connected' && !aggregationMembers.includes(port.name)) {
                     interfaces.push(port.name);
@@ -523,18 +525,20 @@ const STPConfig: React.FC<STPConfigProps> = ({ selectedNode, onNodeUpdate, isExp
                                                 const getAvailableStpInterfaces = () => {
                                                     const interfaces = [];
                                                     if (selectedNode.config.linkAggregation.enabled) {
-                                                        const groupId = selectedNode.config.linkAggregation.groupId;
-                                                        let aggregationInterface = '';
-                                                        if (selectedNode.vendor === Vendor.Cisco) {
-                                                            aggregationInterface = `Port-channel${groupId}`;
-                                                        } else if (selectedNode.vendor === Vendor.Huawei) {
-                                                            aggregationInterface = `Eth-Trunk${groupId}`;
-                                                        } else if (selectedNode.vendor === Vendor.H3C) {
-                                                            aggregationInterface = `Bridge-Aggregation${groupId}`;
-                                                        }
-                                                        if (aggregationInterface) interfaces.push(aggregationInterface);
+                                                        (selectedNode.config.linkAggregation.groups || []).forEach(g => {
+                                                            const groupId = g.groupId;
+                                                            let aggregationInterface = '';
+                                                            if (selectedNode.vendor === Vendor.Cisco) {
+                                                                aggregationInterface = `Port-channel${groupId}`;
+                                                            } else if (selectedNode.vendor === Vendor.Huawei) {
+                                                                aggregationInterface = `Eth-Trunk${groupId}`;
+                                                            } else if (selectedNode.vendor === Vendor.H3C) {
+                                                                aggregationInterface = `Bridge-Aggregation${groupId}`;
+                                                            }
+                                                            if (aggregationInterface) interfaces.push(aggregationInterface);
+                                                        });
                                                     }
-                                                    const aggregationMembers = selectedNode.config.linkAggregation.enabled ? selectedNode.config.linkAggregation.members.map(m => m.name) : [];
+                                                    const aggregationMembers = selectedNode.config.linkAggregation.enabled ? (selectedNode.config.linkAggregation.groups || []).flatMap(g => g.members.map(m => m.name)) : [];
                                                     selectedNode.ports.forEach(port => {
                                                         if (port.status === 'connected' && !aggregationMembers.includes(port.name)) {
                                                             interfaces.push(port.name);
@@ -552,22 +556,24 @@ const STPConfig: React.FC<STPConfigProps> = ({ selectedNode, onNodeUpdate, isExp
                                                 const getAvailableStpInterfaces = () => {
                                                     const interfaces = [];
                                                     if (selectedNode.config.linkAggregation.enabled) {
-                                                        const groupId = selectedNode.config.linkAggregation.groupId;
-                                                        let aggregationInterface = '';
-                                                        let displayName = '';
-                                                        if (selectedNode.vendor === Vendor.Cisco) {
-                                                            aggregationInterface = `Port-channel${groupId}`;
-                                                            displayName = `Port-channel${groupId} (聚合接口)`;
-                                                        } else if (selectedNode.vendor === Vendor.Huawei) {
-                                                            aggregationInterface = `Eth-Trunk${groupId}`;
-                                                            displayName = `Eth-Trunk${groupId} (聚合接口)`;
-                                                        } else if (selectedNode.vendor === Vendor.H3C) {
-                                                            aggregationInterface = `Bridge-Aggregation${groupId}`;
-                                                            displayName = `Bridge-Aggregation${groupId} (聚合接口)`;
-                                                        }
-                                                        if (aggregationInterface) interfaces.push({ name: aggregationInterface, displayName: displayName });
+                                                        (selectedNode.config.linkAggregation.groups || []).forEach(g => {
+                                                            const groupId = g.groupId;
+                                                            let aggregationInterface = '';
+                                                            let displayName = '';
+                                                            if (selectedNode.vendor === Vendor.Cisco) {
+                                                                aggregationInterface = `Port-channel${groupId}`;
+                                                                displayName = `Port-channel${groupId} (聚合接口)`;
+                                                            } else if (selectedNode.vendor === Vendor.Huawei) {
+                                                                aggregationInterface = `Eth-Trunk${groupId}`;
+                                                                displayName = `Eth-Trunk${groupId} (聚合接口)`;
+                                                            } else if (selectedNode.vendor === Vendor.H3C) {
+                                                                aggregationInterface = `Bridge-Aggregation${groupId}`;
+                                                                displayName = `Bridge-Aggregation${groupId} (聚合接口)`;
+                                                            }
+                                                            if (aggregationInterface) interfaces.push({ name: aggregationInterface, displayName: displayName });
+                                                        });
                                                     }
-                                                    const aggregationMembers = selectedNode.config.linkAggregation.enabled ? selectedNode.config.linkAggregation.members.map(m => m.name) : [];
+                                                    const aggregationMembers = selectedNode.config.linkAggregation.enabled ? (selectedNode.config.linkAggregation.groups || []).flatMap(g => g.members.map(m => m.name)) : [];
                                                     selectedNode.ports.forEach(port => {
                                                         if (port.status === 'connected' && !aggregationMembers.includes(port.name)) {
                                                             interfaces.push({ name: port.name, displayName: `${port.name} (已连接)` });
