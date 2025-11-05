@@ -103,7 +103,7 @@ npm -v
     ```bash
     npm run dev
     ```
-    ```
+
     如果是在Linux上后台运行该项目，需要下载pm进行管理
     ```
     npm install -g pm2
