@@ -78,24 +78,18 @@ const HAConfig: React.FC<HAConfigProps> = ({ selectedNode, onNodeUpdate, isExpan
     const availableInterfaces = useMemo(() => {
         if (!selectedNode) return [];
         const physicalInterfaces = selectedNode.ports.map(p => p.name);
-        
-        const linkAggConfig = selectedNode.config.linkAggregation;
-        if (linkAggConfig.enabled && linkAggConfig.groupId) {
-            let aggInterfaceName = '';
-            if (selectedNode.vendor === Vendor.Huawei) {
-                aggInterfaceName = `Eth-Trunk${linkAggConfig.groupId}`;
-            } else if (selectedNode.vendor === Vendor.H3C) {
-                aggInterfaceName = `Bridge-Aggregation${linkAggConfig.groupId}`;
-            } else if (selectedNode.vendor === Vendor.Cisco) {
-                aggInterfaceName = `Port-channel${linkAggConfig.groupId}`;
-            }
-            
-            if (aggInterfaceName) {
-                return [aggInterfaceName, ...physicalInterfaces];
-            }
+        const aggIfaces: string[] = [];
+        const linkAgg = selectedNode.config.linkAggregation;
+        if (linkAgg.enabled) {
+            (linkAgg.groups || []).forEach(g => {
+                const gid = g.groupId;
+                if (!gid) return;
+                if (selectedNode.vendor === Vendor.Huawei) aggIfaces.push(`Eth-Trunk${gid}`);
+                else if (selectedNode.vendor === Vendor.H3C) aggIfaces.push(`Bridge-Aggregation${gid}`);
+                else if (selectedNode.vendor === Vendor.Cisco) aggIfaces.push(`Port-channel${gid}`);
+            });
         }
-        
-        return physicalInterfaces;
+        return [...aggIfaces, ...physicalInterfaces];
     }, [selectedNode.ports, selectedNode.config.linkAggregation, selectedNode.vendor]);
 
     const renderH3CConfig = () => (
