@@ -2,6 +2,7 @@
 import React, { useCallback, useMemo, useState } from 'react';
 import { Node, MLAGInterfaceConfig, Vendor, DeviceType, HuaweiMLAGInterfaceConfig } from '../../types';
 import { SpinnerIcon } from '../Icons';
+import { useAuth } from '../../context/AuthContext';
 
 interface MLAGConfigProps {
     selectedNode: Node;
@@ -77,7 +78,7 @@ const InterfaceListManager: React.FC<{
 
 
 const MLAGConfig: React.FC<MLAGConfigProps> = ({ selectedNode, onNodeUpdate, isExpanded, onToggle, onToggleFeature, isGenerating }) => {
-    
+    const { user } = useAuth();
     const config = selectedNode.config.mlag;
     const [expandedInterfaces, setExpandedInterfaces] = useState<Set<string>>(new Set());
 
@@ -152,7 +153,7 @@ const MLAGConfig: React.FC<MLAGConfigProps> = ({ selectedNode, onNodeUpdate, isE
     const availableBridgeAggregations = useMemo(() => {
         const groupIds = new Set<string>();
         if (selectedNode.config.linkAggregation.enabled) {
-            groupIds.add(selectedNode.config.linkAggregation.groupId);
+            (selectedNode.config.linkAggregation.groups || []).forEach(g => { if (g.groupId) groupIds.add(g.groupId); });
         }
         return Array.from(groupIds).map(id => ({ id, name: `Bridge-Aggregation${id}` }));
     }, [selectedNode.config.linkAggregation]);
@@ -174,8 +175,8 @@ const MLAGConfig: React.FC<MLAGConfigProps> = ({ selectedNode, onNodeUpdate, isE
         const trunkIds = new Set<string>();
 
         // From Link Aggregation panel
-        if (selectedNode.config.linkAggregation.enabled && selectedNode.config.linkAggregation.groupId) {
-            trunkIds.add(selectedNode.config.linkAggregation.groupId);
+        if (selectedNode.config.linkAggregation.enabled) {
+            (selectedNode.config.linkAggregation.groups || []).forEach(g => { if (g.groupId) trunkIds.add(g.groupId); });
         }
 
         // From M-LAG peer-link config
@@ -194,6 +195,26 @@ const MLAGConfig: React.FC<MLAGConfigProps> = ({ selectedNode, onNodeUpdate, isE
     }, [selectedNode.config.linkAggregation, config.huawei?.interfaces, config.huawei?.peerLinkTrunkId]);
 
     const isApplicable = selectedNode.type.includes('Switch');
+    const isPaidUser = user?.is_paid || false;
+
+    if (!isPaidUser && isApplicable && config.enabled) {
+        return (
+            <div className="bg-slate-700/50 rounded-lg">
+                <div className="flex justify-between items-center p-3 cursor-pointer hover:bg-slate-600/50 rounded-t-lg" onClick={onToggle}>
+                    <div className="flex items-center gap-2"><span className={`transition-transform text-slate-400 ${isExpanded ? 'rotate-90' : ''}`}>▶</span><h4 className="font-semibold">M-LAG</h4></div>
+                    <button disabled className="px-2 py-1 text-xs rounded-full bg-gray-500/50 text-gray-300">Premium</button>
+                </div>
+                {isExpanded && (
+                    <div className="border-t border-slate-600 p-4 text-center">
+                        <div className="bg-yellow-900/30 border border-yellow-600 rounded-lg p-4">
+                            <p className="text-yellow-300 text-sm font-medium">🔒 M-LAG 配置仅对付费用户开放</p>
+                            <p className="text-yellow-200/70 text-xs mt-2">请升级到付费版本以解锁此功能</p>
+                        </div>
+                    </div>
+                )}
+            </div>
+        );
+    }
 
     return (
         <div className="bg-slate-700/50 rounded-lg">
