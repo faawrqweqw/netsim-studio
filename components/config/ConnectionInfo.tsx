@@ -23,7 +23,7 @@ const ConnectionItem: React.FC<{
     // 检查端口是否在聚合组中
     const isPortInAggregation = () => {
         if (!sourcePort || !sourceNode.config.linkAggregation.enabled) return false;
-        return sourceNode.config.linkAggregation.members.some(member => member.name === sourcePort.name);
+        return (sourceNode.config.linkAggregation.groups || []).some(g => g.members.some(member => member.name === sourcePort.name));
     };
 
     const portInAggregation = isPortInAggregation();
