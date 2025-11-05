@@ -634,7 +634,7 @@ const ConfigPanel: React.FC<ConfigPanelProps> = ({ selectedNode, selectedConnect
                         </div>
 
                         <div className="bg-slate-800 rounded-lg overflow-hidden">
-                            <div className="flex justify-between items-center p-3 cursor-pointer bg-slate-900/50 hover:bg-slate-900/80" onClick={() => toggleSection('l2Switching')}>
+                            <div className="flex justify-between items-center p-3 cursor-pointer bg-slate-900/50 hover:bg-slate-900/80" onClick={(e) => { e.preventDefault(); e.stopPropagation(); toggleSection('l2Switching'); }}>
                                 <div className="flex items-center gap-3">
                                     <span className={`transition-transform text-slate-300 ${expandedSections.l2Switching ? 'rotate-90' : ''}`}>▶</span>
                                     <h3 className="font-bold text-base text-slate-200">二层交换配置</h3>
