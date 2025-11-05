@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 
-const API_BASE_URL = 'http://localhost:3001/api';
+// 使用相对路径，支持部署到服务器
+const API_BASE_URL = '/api';
 
 interface Backup {
   id: string;
