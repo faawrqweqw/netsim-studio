@@ -80,6 +80,7 @@ const InterfaceListManager: React.FC<{
 const MLAGConfig: React.FC<MLAGConfigProps> = ({ selectedNode, onNodeUpdate, isExpanded, onToggle, onToggleFeature, isGenerating }) => {
     
     const config = selectedNode.config.mlag;
+    const isApplicable = selectedNode.type.includes('Switch');
     const [expandedInterfaces, setExpandedInterfaces] = useState<Set<string>>(new Set());
 
     const toggleInterfaceExpansion = (id: string) => {
