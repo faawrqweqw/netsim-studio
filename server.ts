@@ -1,4 +1,3 @@
-
 // FIX: Import Request and Response types directly from 'express' to fix type errors.
 import express, { Request, Response } from 'express';
 import { createServer } from 'http';
@@ -34,12 +33,11 @@ const corsOptions = {
 };
 
 app.use(cors(corsOptions));
-// FIX: Correctly handle middleware with app.use. The previous error suggested a type issue with express, which is resolved by using a qualified import.
 app.use(express.json({ limit: '5mb' }));
 
 // --- WebSocket Setup for real-time progress ---
 const server = createServer(app);
-const wss = new WebSocketServer({ noServer: true }); // Use noServer option for manual upgrade handling
+const wss = new WebSocketServer({ noServer: true });
 
 const clients = new Set<WebSocket>();
 wss.on('connection', (ws) => {
@@ -48,18 +46,15 @@ wss.on('connection', (ws) => {
     ws.on('error', console.error);
 });
 
-// Manually handle the HTTP upgrade request for WebSockets
 server.on('upgrade', (request, socket, head) => {
   if (request.url === '/api/ws/inspection-progress') {
     wss.handleUpgrade(request, socket, head, (ws) => {
       wss.emit('connection', ws, request);
     });
   } else {
-    // If the path doesn't match, destroy the socket to reject the connection
     socket.destroy();
   }
 });
-
 
 function broadcast(message: object) {
     const data = JSON.stringify(message);
@@ -72,15 +67,22 @@ function broadcast(message: object) {
     }
 }
 
-// In-memory store for active SSH connections
+// In-memory stores
 const connections = new Map<string, { conn: Client, stream: ClientChannel }>();
-// In-memory store for inspection history
 const inspectionHistory = new Map<string, any[]>();
-// In-memory store for scheduled backup tasks
 const scheduledTasks = new Map<string, { task: cron.ScheduledTask; devices: any[]; cronExpression: string }>();
+const scheduledInspectionTasks = new Map<string, { task: cron.ScheduledTask; devices: any[]; templates: any[]; cronExpression: string }>();
 
 // 提取备份逻辑为可复用函数
-async function performBackupForDevice(deviceId: string, deviceName: string, deviceIp: string, devicePort: number, deviceUsername: string, devicePassword: string, deviceVendor: string): Promise<{ success: boolean; backup?: any; error?: string }> {
+async function performBackupForDevice(
+    deviceId: string, 
+    deviceName: string, 
+    deviceIp: string, 
+    devicePort: number, 
+    deviceUsername: string, 
+    devicePassword: string, 
+    deviceVendor: string
+): Promise<{ success: boolean; backup?: any; error?: string }> {
     try {
         const conn = new Client();
         const command = getConfigCommand(deviceVendor);
@@ -288,9 +290,212 @@ async function performBackupForDevice(deviceId: string, deviceName: string, devi
     }
 }
 
+// 提取巡检逻辑为可复用函数
+async function performInspectionForDevice(
+    deviceId: string, 
+    deviceName: string, 
+    deviceIp: string, 
+    devicePort: number, 
+    deviceUsername: string, 
+    devicePassword: string, 
+    deviceVendor: string,
+    templates: any[]
+): Promise<{ success: boolean; results?: any; error?: string }> {
+    try {
+        const conn = new Client();
+        
+        return await new Promise((resolve) => {
+            const timeout = setTimeout(() => {
+                conn.end();
+                resolve({ success: false, error: 'Connection timeout' });
+            }, 120000);
 
-// --- New NetOps Endpoints ---
+            conn.on('ready', () => {
+                clearTimeout(timeout);
+                conn.shell(async (err, stream) => {
+                    if (err) {
+                        conn.end();
+                        return resolve({ success: false, error: err.message });
+                    }
 
+                    const allCommands: { category: string; command: string; parse?: string; name: string }[] = [];
+                    templates.forEach(template => {
+                        if (template.commands && Array.isArray(template.commands)) {
+                            template.commands.forEach((cmd: any) => {
+                                allCommands.push({
+                                    category: cmd.category,
+                                    command: cmd.cmd,
+                                    parse: cmd.parse,
+                                    name: cmd.name
+                                });
+                            });
+                        }
+                    });
+
+                    if (allCommands.length === 0) {
+                        conn.end();
+                        return resolve({ success: false, error: 'No commands to execute' });
+                    }
+
+                    const commandSequence: string[] = [];
+                    
+                    if (deviceVendor.toLowerCase() === 'cisco' || deviceVendor.toLowerCase() === 'ruijie') {
+                        commandSequence.push('terminal length 0');
+                    } else if (deviceVendor.toLowerCase() === 'huawei' || deviceVendor.toLowerCase() === 'h3c') {
+                        commandSequence.push('screen-length 0 temporary');
+                    }
+                    
+                    allCommands.forEach(cmd => {
+                        commandSequence.push(cmd.command);
+                    });
+                    
+                    commandSequence.push('quit');
+                    
+                    let buffer = '';
+                    let commandIndex = 0;
+                    let sessionStarted = false;
+                    let outputProcessed = false;
+                    const finalResults: Record<string, Record<string, any>> = {};
+                    
+                    const sendNextCommand = () => {
+                        if (commandIndex >= commandSequence.length) {
+                            setTimeout(() => {
+                                processAllOutput();
+                                stream.end();
+                            }, 1000);
+                            return;
+                        }
+                        
+                        const command = commandSequence[commandIndex];
+                        stream.write(command + '\n');
+                        commandIndex++;
+                        
+                        setTimeout(sendNextCommand, 100);
+                    };
+                    
+                    const processAllOutput = () => {
+                        if (outputProcessed) return;
+                        outputProcessed = true;
+                        
+                        try {
+                            allCommands.forEach(cmdInfo => {
+                                if (!finalResults[cmdInfo.category]) {
+                                    finalResults[cmdInfo.category] = {};
+                                }
+                            });
+
+                            let currentBuffer = buffer;
+                            
+                            allCommands.forEach((cmdInfo) => {
+                                const { category, command, name } = cmdInfo;
+                                
+                                let cleanedOutput = '';
+                                const cmdRegex = new RegExp(`${command.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}([\\s\\S]*?)(?=<[^>]+>|\\[[^\\]]+\\]|\\S+[#>]|$)`, 'i');
+                                const match = currentBuffer.match(cmdRegex);
+                                
+                                if (match && match[1]) {
+                                    cleanedOutput = match[1]
+                                        .replace(/\r/g, '')
+                                        .replace(/^\s*\n/gm, '')
+                                        .replace(/^.*[#>$]\s*$/gm, '')
+                                        .trim();
+                                }
+                                
+                                if (!cleanedOutput) {
+                                    cleanedOutput = 'No output returned.';
+                                }
+                                
+                                const parsedData = parseCommandOutput(deviceVendor as any, command, cleanedOutput);
+                                finalResults[category][name || command] = parsedData;
+                            });
+                            
+                            resolve({ success: true, results: finalResults });
+                        } catch (err: any) {
+                            resolve({ success: false, error: err.message });
+                        }
+                    };
+
+                    stream.on('data', (data: Buffer) => {
+                        if (!sessionStarted) {
+                            sessionStarted = true;
+                            setTimeout(sendNextCommand, 500);
+                        }
+                        
+                        const dataStr = data.toString('utf-8');
+                        buffer += dataStr;
+                        
+                        if (dataStr.includes('---- More ----') || dataStr.includes('-- More --')) {
+                            stream.write(' ');
+                        }
+                    });
+
+                    stream.on('close', () => {
+                        conn.end();
+                        if (!outputProcessed) {
+                            processAllOutput();
+                        }
+                    });
+                    
+                    stream.on('error', (streamErr) => {
+                        conn.end();
+                        if (!outputProcessed) {
+                            resolve({ success: false, error: streamErr.message });
+                        }
+                    });
+                });
+            }).on('error', (err) => {
+                clearTimeout(timeout);
+                resolve({ success: false, error: err.message });
+            }).connect({
+                host: deviceIp,
+                port: devicePort,
+                username: deviceUsername,
+                password: devicePassword,
+                readyTimeout: 20000,
+                algorithms: {
+                    kex: [
+                        'diffie-hellman-group1-sha1',
+                        'diffie-hellman-group14-sha1',
+                        'diffie-hellman-group-exchange-sha1',
+                        'diffie-hellman-group-exchange-sha256',
+                        'ecdh-sha2-nistp256',
+                        'ecdh-sha2-nistp384',
+                        'ecdh-sha2-nistp521'
+                    ],
+                    cipher: [
+                        'aes128-ctr',
+                        'aes192-ctr',
+                        'aes256-ctr',
+                        'aes128-gcm',
+                        'aes256-gcm',
+                        'aes128-cbc',
+                        'aes192-cbc',
+                        'aes256-cbc',
+                        '3des-cbc'
+                    ],
+                    hmac: [
+                        'hmac-sha2-256',
+                        'hmac-sha2-512',
+                        'hmac-sha1',
+                        'hmac-sha1-96'
+                    ],
+                    serverHostKey: [
+                        'ssh-rsa',
+                        'ssh-dss',
+                        'ecdsa-sha2-nistp256',
+                        'ecdsa-sha2-nistp384',
+                        'ecdsa-sha2-nistp521',
+                        'ssh-ed25519'
+                    ]
+                }
+            } as ConnectConfig);
+        });
+    } catch (error: any) {
+        return { success: false, error: error.message };
+    }
+}
+
+// --- Utility Functions ---
 function tcpPing(host: string, port: number, timeout: number): Promise<{ alive: boolean, time: number | null }> {
     return new Promise((resolve) => {
         const socket = new net.Socket();
@@ -309,7 +514,7 @@ function tcpPing(host: string, port: number, timeout: number): Promise<{ alive: 
             resolve({ alive: false, time: null });
         });
 
-        socket.on('error', (err) => {
+        socket.on('error', () => {
             socket.destroy();
             resolve({ alive: false, time: null });
         });
@@ -318,10 +523,9 @@ function tcpPing(host: string, port: number, timeout: number): Promise<{ alive: 
     });
 }
 
-
 interface PingOptions {
     count: number;
-    timeout: number; // ms
+    timeout: number;
     packetSize: number;
 }
 
@@ -354,7 +558,6 @@ export function execPing(ip: string, options: PingOptions): Promise<PingResult> 
         }
 
         exec(command, { encoding: 'buffer' }, async (error, stdoutBuf, stderrBuf) => {
-            // 将 Windows 中文输出从 GBK 解码
             const stdout = iconv.decode(stdoutBuf, 'cp936');
             const stderr = iconv.decode(stderrBuf, 'cp936');
 
@@ -383,22 +586,18 @@ export function execPing(ip: string, options: PingOptions): Promise<PingResult> 
                 let status: 'online' | 'offline' = 'offline';
 
                 if (platform === 'win32') {
-                    // 失败提示直接 offline
                     if (/请求超时|无法访问目标主机/i.test(stdout)) {
                         status = 'offline';
                     } else {
-                        // 丢包率判断
                         const lostMatch = stdout.match(/已发送\s*=\s*(\d+).*已接收\s*=\s*(\d+)/i);
                         if (lostMatch) {
                             const received = parseInt(lostMatch[2], 10);
                             status = received > 0 ? 'online' : 'offline';
                         }
 
-                        // TTL 提取
                         const ttlMatch = stdout.match(/TTL=(\d+)/i);
                         ttl = ttlMatch ? parseInt(ttlMatch[1], 10) : 'N/A';
 
-                        // 时间统计
                         const statsMatch = stdout.match(/(?:Minimum|最短)\s*=\s*(\d+)\s*ms[，,]?\s*(?:Maximum|最长)\s*=\s*(\d+)\s*ms[，,]?\s*(?:Average|平均)\s*=\s*(\d+)\s*ms/i);
                         if (statsMatch) {
                             time = {
@@ -415,7 +614,6 @@ export function execPing(ip: string, options: PingOptions): Promise<PingResult> 
                         }
                     }
                 } else {
-                    // macOS / Linux
                     const ttlMatch = stdout.match(/ttl=(\d+)/i);
                     ttl = ttlMatch ? parseInt(ttlMatch[1], 10) : 'N/A';
 
@@ -432,7 +630,6 @@ export function execPing(ip: string, options: PingOptions): Promise<PingResult> 
                         }
                     }
 
-                    // 额外判断无响应情况
                     if (/100% packet loss|Destination Host Unreachable/i.test(stdout)) {
                         status = 'offline';
                     }
@@ -446,10 +643,18 @@ export function execPing(ip: string, options: PingOptions): Promise<PingResult> 
     });
 }
 
+function getConfigCommand(vendor: string): string {
+    const commands: Record<string, string> = {
+        huawei: 'display current-configuration',
+        cisco: 'show running-config',
+        h3c: 'display current-configuration',
+        ruijie: 'show running-config'
+    };
+    return commands[vendor.toLowerCase()] || 'show running-config';
+}
 
+// --- API Endpoints ---
 
-
-// FIX: Use Request and Response types from 'express' to fix type errors.
 app.post('/api/ping', async (req: Request, res: Response) => {
     const { ips, options } = req.body;
     if (!Array.isArray(ips)) return res.status(400).json({ error: 'Expected an array of IPs.' });
@@ -485,15 +690,12 @@ app.post('/api/ping', async (req: Request, res: Response) => {
     }
 });
 
-
-// FIX: Use Request and Response types from 'express' to fix type errors.
 app.get('/api/inspection/history/:deviceId', (req: Request, res: Response) => {
     const { deviceId } = req.params;
     const history = inspectionHistory.get(deviceId) || [];
     res.json(history);
 });
 
-// FIX: Use Request and Response types from 'express' to fix type errors.
 app.post('/api/inspect', (req: Request, res: Response) => {
     const { deviceId, host, port: portStr = '22', username, password, vendor, categories: categoriesToRun, commands: templateCommands } = req.body;
     const port = parseInt(portStr, 10);
@@ -506,11 +708,8 @@ app.post('/api/inspect', (req: Request, res: Response) => {
     }
     
     const taskId = crypto.randomUUID();
-
-    // Respond to the client immediately
     res.json({ taskId });
 
-    // The inspection runs in the background
     (async () => {
         const progressCallback: ProgressCallback = (update) => {
             broadcast({ deviceId, taskId, ...update });
@@ -520,10 +719,8 @@ app.post('/api/inspect', (req: Request, res: Response) => {
         let finalError: string | undefined;
 
         try {
-
             const allCommandsToRun: { category: string, command: string, parse?: string, name?: string }[] = [];
 
-            // Process template commands only
             if (!templateCommands || !Array.isArray(templateCommands) || templateCommands.length === 0) {
                 throw new Error('Template commands are required for inspection.');
             }
@@ -538,7 +735,6 @@ app.post('/api/inspect', (req: Request, res: Response) => {
                         command: templateCmd.cmd,
                         parse: templateCmd.parse,
                         name: templateCmd.name,
-                        isEcho: true  // All inspection commands need echo markers to capture output
                     });
                 }
             });
@@ -571,7 +767,6 @@ app.post('/api/inspect', (req: Request, res: Response) => {
                         readyTimeout: 20000, 
                         keepaliveInterval: 5000, 
                         keepaliveCountMax: 3,
-                        // 添加更多兼容的算法支持
                         algorithms: {
                             kex: [
                                 'diffie-hellman-group1-sha1',
@@ -611,16 +806,13 @@ app.post('/api/inspect', (req: Request, res: Response) => {
                     });
             });
 
-            // Long session execution: setup → inspection → cleanup → disconnect
             try {
                 await new Promise<void>((resolve, reject) => {
                     conn.shell((err, stream) => {
                         if (err) return reject(err);
 
-                        // Build complete command sequence
                         const commandSequence: string[] = [];
                         
-                        // 1. Setup commands - disable terminal limits
                         if (vendor.toLowerCase() === 'cisco' || vendor.toLowerCase() === 'ruijie') {
                             commandSequence.push('terminal length 0');
                         } else if (vendor.toLowerCase() === 'huawei' || vendor.toLowerCase() === 'h3c') {
@@ -632,12 +824,10 @@ app.post('/api/inspect', (req: Request, res: Response) => {
                             );
                         }
                         
-                        // 2. Add all inspection commands
                         allCommandsToRun.forEach(cmd => {
                             commandSequence.push(cmd.command);
                         });
                         
-                        // 3. Cleanup commands - restore terminal limits
                         if (vendor.toLowerCase() === 'cisco' || vendor.toLowerCase() === 'ruijie') {
                             commandSequence.push('terminal length 40');
                         } else if (vendor.toLowerCase() === 'huawei' || vendor.toLowerCase() === 'h3c') {
@@ -648,7 +838,6 @@ app.post('/api/inspect', (req: Request, res: Response) => {
                             );
                         }
                         
-                        // 4. Add exit commands to properly close session
                         commandSequence.push('exit');
                         commandSequence.push('exit');
                         
@@ -659,7 +848,6 @@ app.post('/api/inspect', (req: Request, res: Response) => {
                         
                         const sendNextCommand = () => {
                             if (commandIndex >= commandSequence.length) {
-                                // All commands sent, wait for final output then close
                                 setTimeout(() => {
                                     processAllOutput();
                                     stream.end();
@@ -671,7 +859,6 @@ app.post('/api/inspect', (req: Request, res: Response) => {
                             const isInspectionCommand = commandIndex >= getSetupCommandCount() && 
                                                       commandIndex < (commandSequence.length - getCleanupCommandCount() - 1);
                             
-                            // Show progress for inspection commands
                             if (isInspectionCommand) {
                                 const inspectionIndex = commandIndex - getSetupCommandCount();
                                 const inspectionCmd = allCommandsToRun[inspectionIndex];
@@ -686,29 +873,27 @@ app.post('/api/inspect', (req: Request, res: Response) => {
                             stream.write(command + '\n');
                             commandIndex++;
                             
-                            // Send next command after delay (300ms for quit commands, 100ms for others)
                             const delay = command === 'quit' ? 300 : 100;
                             setTimeout(sendNextCommand, delay);
                         };
                         
                         const getSetupCommandCount = () => {
                             if (vendor.toLowerCase() === 'cisco' || vendor.toLowerCase() === 'ruijie') {
-                                return 1; // terminal length 0
+                                return 1;
                             } else {
-                                return 4; // system-view, user-interface, screen-length, quit
+                                return 4;
                             }
                         };
                         
                         const getCleanupCommandCount = () => {
                             if (vendor.toLowerCase() === 'cisco' || vendor.toLowerCase() === 'ruijie') {
-                                return 1; // terminal length 40
+                                return 1;
                             } else {
-                                return 4; // system-view, user-interface, undo screen-length, quit
+                                return 4;
                             }
                         };
                         
                         const processAllOutput = () => {
-                            // Add complete session output to Raw Log for full inspection view
                             finalResults['Raw Log'] = {
                                 'Complete Session Output': {
                                     type: 'raw',
@@ -717,17 +902,14 @@ app.post('/api/inspect', (req: Request, res: Response) => {
                                 }
                             };
                             
-                            // Parse the complete output and extract results for each inspection command  
                             let currentBuffer = buffer;
                             
                             allCommandsToRun.forEach((cmdInfo, index) => {
                                 const { category, command, name } = cmdInfo;
                                 const commandDisplayName = name || command;
                                 
-                                // Try multiple approaches to find command output
                                 let cleanedOutput = '';
                                 
-                                // Approach 1: Look for command followed by output until next prompt
                                 const cmdRegex1 = new RegExp(`${command.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}([\s\S]*?)(?=<[^>]+>|\[[^\]]+\]|\S+[#>]|$)`, 'i');
                                 const match1 = currentBuffer.match(cmdRegex1);
                                 
@@ -738,17 +920,15 @@ app.post('/api/inspect', (req: Request, res: Response) => {
                                         .replace(/^.*[#>$]\s*$/gm, '')
                                         .trim();
                                 } else {
-                                    // Approach 2: Look for command, then extract next lines
                                     const cmdIndex = currentBuffer.indexOf(command);
                                     if (cmdIndex !== -1) {
                                         const afterCommand = currentBuffer.substring(cmdIndex + command.length);
                                         const lines = afterCommand.split('\n');
-                                        // Take up to 50 lines or until we hit a device prompt
                                         const outputLines: string[] = [];
                                         for (let i = 0; i < Math.min(50, lines.length); i++) {
                                             const line = lines[i].trim();
                                             if (line.match(/^<[^>]+>$|^\[[^\]]+\]$|^\S+[#>]$/)) {
-                                                break; // Hit device prompt, stop
+                                                break;
                                             }
                                             if (line.length > 0) {
                                                 outputLines.push(line);
@@ -762,7 +942,6 @@ app.post('/api/inspect', (req: Request, res: Response) => {
                                     cleanedOutput = 'No output returned.';
                                 }
                                 
-                                // Parse the output
                                 const rawParsedResult = parseCommandOutput(vendor as any, command, cleanedOutput);
                                 
                                 let parsedData;
@@ -784,7 +963,6 @@ app.post('/api/inspect', (req: Request, res: Response) => {
                                 });
                             });
                             
-                            // After processing all commands, send final completion message
                             progressCallback({
                                 progress: 100,
                                 log: { 'Raw Log': { 'Complete Session Output': {
@@ -798,14 +976,12 @@ app.post('/api/inspect', (req: Request, res: Response) => {
                         stream.on('data', (data: Buffer) => {
                             if (!sessionStarted) {
                                 sessionStarted = true;
-                                // Wait for initial prompt, then start sending commands
                                 setTimeout(sendNextCommand, 500);
                             }
                             
                             const dataStr = data.toString('utf-8').replace(/\r/g, '');
                             buffer += dataStr;
                             
-                            // Handle pagination by sending space
                             if (MORE_REGEX.test(buffer)) {
                                 stream.write(' ');
                             }
@@ -819,10 +995,9 @@ app.post('/api/inspect', (req: Request, res: Response) => {
                             reject(streamErr);
                         });
                         
-                        stream.stderr.on('data', (data: Buffer) => {
-                            // Suppress STDERR output
+                        stream.stderr.on('data', () => {
+                            // Suppress STDERR
                         });
-                        
                     });
                 });
             } finally {
@@ -831,12 +1006,10 @@ app.post('/api/inspect', (req: Request, res: Response) => {
 
         } catch (error: any) {
             finalError = `Inspection failed: ${error.message}`;
-
             const errorLog = { 'Error': { 'Inspection Failed': finalError, 'Details': error.stack || error.toString() } };
             Object.assign(finalResults, errorLog);
         }
 
-        // --- Final broadcast and history logging ---
         const historyEntry = {
             taskId,
             timestamp: new Date().toLocaleString(),
@@ -861,9 +1034,6 @@ app.post('/api/inspect', (req: Request, res: Response) => {
     })();
 });
 
-
-// --- Existing Interactive SSH Endpoints ---
-// FIX: Use Request and Response types from 'express' to fix type errors.
 app.post('/api/ssh/connect', (req: Request, res: Response) => {
     try {
         const { host, port: portStr = '22', username, password } = req.body;
@@ -876,14 +1046,12 @@ app.post('/api/ssh/connect', (req: Request, res: Response) => {
         const sessionId = crypto.randomUUID();
         const conn = new Client();
         let stream: ClientChannel;
-        let responseSent = false; // 添加标志防止重复发送响应
+        let responseSent = false;
 
         const cleanup = () => {
             try {
                 connections.delete(sessionId);
-            } catch (e) {
-                // Suppress cleanup errors
-            }
+            } catch (e) {}
         };
 
         const sendError = (error: string) => {
@@ -891,9 +1059,7 @@ app.post('/api/ssh/connect', (req: Request, res: Response) => {
                 responseSent = true;
                 try {
                     res.status(500).json({ error });
-                } catch (e) {
-                    // Suppress response error logging
-                }
+                } catch (e) {}
             }
         };
 
@@ -902,19 +1068,16 @@ app.post('/api/ssh/connect', (req: Request, res: Response) => {
                 responseSent = true;
                 try {
                     res.json(data);
-                } catch (e) {
-                    // Suppress response error logging
-                }
+                } catch (e) {}
             }
         };
 
-        // 添加超时处理
         const timeout = setTimeout(() => {
             if (!responseSent) {
                 cleanup();
                 sendError('Connection timeout');
             }
-        }, 30000); // 30秒超时
+        }, 30000);
 
         conn.on('ready', () => {
             clearTimeout(timeout);
@@ -929,7 +1092,7 @@ app.post('/api/ssh/connect', (req: Request, res: Response) => {
                     conn.end();
                     cleanup();
                 });
-                stream.on('error', (streamErr) => {
+                stream.on('error', () => {
                     conn.end();
                     cleanup();
                 });
@@ -942,7 +1105,6 @@ app.post('/api/ssh/connect', (req: Request, res: Response) => {
         }).on('close', () => {
             clearTimeout(timeout);
             cleanup();
-            // 只有在连接关闭且没有发送过响应时才发送错误
             if (!responseSent) {
                 sendError('Connection closed unexpectedly');
             }
@@ -962,7 +1124,6 @@ app.post('/api/ssh/connect', (req: Request, res: Response) => {
                 password: password as string, 
                 readyTimeout: 20000, 
                 timeout: 20000,
-                // 添加更多兼容的算法支持
                 algorithms: {
                     kex: [
                         'diffie-hellman-group1-sha1',
@@ -1012,7 +1173,6 @@ app.post('/api/ssh/connect', (req: Request, res: Response) => {
     }
 });
 
-// FIX: Use Request and Response types from 'express' to fix type errors.
 app.get('/api/ssh/stream/:sessionId', (req: Request, res: Response) => {
     const { sessionId } = req.params;
     const connInfo = connections.get(sessionId);
@@ -1031,7 +1191,6 @@ app.get('/api/ssh/stream/:sessionId', (req: Request, res: Response) => {
     req.on('close', () => connInfo.stream.removeListener('data', onData));
 });
 
-// FIX: Use Request and Response types from 'express' to fix type errors.
 app.post('/api/ssh/input/:sessionId', (req: Request, res: Response) => {
     const { sessionId } = req.params;
     const { command } = req.body;
@@ -1052,7 +1211,6 @@ app.post('/api/ssh/input/:sessionId', (req: Request, res: Response) => {
     }
 });
 
-// FIX: Use Request and Response types from 'express' to fix type errors.
 app.post('/api/ssh/disconnect', (req: Request, res: Response) => {
     const { sessionId } = req.body;
     const connInfo = connections.get(sessionId as string);
@@ -1065,20 +1223,6 @@ app.post('/api/ssh/disconnect', (req: Request, res: Response) => {
     }
 });
 
-// --- Backup Configuration Endpoints ---
-
-// Helper function to get device config command by vendor
-function getConfigCommand(vendor: string): string {
-    const commands: Record<string, string> = {
-        huawei: 'display current-configuration',
-        cisco: 'show running-config',
-        h3c: 'display current-configuration',
-        ruijie: 'show running-config'
-    };
-    return commands[vendor.toLowerCase()] || 'show running-config';
-}
-
-// Test device connection
 app.post('/api/device/test', async (req: Request, res: Response) => {
     const { ip, port = 22, username, password } = req.body;
     
@@ -1155,7 +1299,6 @@ app.post('/api/device/test', async (req: Request, res: Response) => {
     } as ConnectConfig);
 });
 
-// Backup device configuration
 app.post('/api/device/backup', async (req: Request, res: Response) => {
     const { id, name, ip, port = 22, username, password, vendor } = req.body;
     
@@ -1164,254 +1307,17 @@ app.post('/api/device/backup', async (req: Request, res: Response) => {
     }
 
     try {
-        const conn = new Client();
-        const command = getConfigCommand(vendor);
-        
-        await new Promise<void>((resolve, reject) => {
-            const timeout = setTimeout(() => {
-                conn.end();
-                reject(new Error('Connection timeout'));
-            }, 60000); // 增加超时时间到 60 秒
-
-            conn.on('ready', () => {
-                clearTimeout(timeout);
-                
-                // 使用 shell 模式而不是 exec，更适合真机设备
-                conn.shell((err, stream) => {
-                    if (err) {
-                        conn.end();
-                        return reject(err);
-                    }
-
-                    let output = '';
-                    let commandSent = false;
-                    let outputProcessed = false;
-                    let dataTimeout: NodeJS.Timeout;
-                    
-                    // 设置数据接收超时，如果 5 秒内没有新数据，认为命令执行完成
-                    const resetDataTimeout = () => {
-                        if (dataTimeout) clearTimeout(dataTimeout);
-                        dataTimeout = setTimeout(() => {
-                            if (commandSent && output.length > 200 && !outputProcessed) {
-                                stream.end('quit\r');
-                                setTimeout(() => {
-                                    conn.end();
-                                    processOutput();
-                                }, 1000);
-                            }
-                        }, 5000);
-                    };
-
-                    const processOutput = async () => {
-                        if (outputProcessed) {
-                            return;
-                        }
-                        outputProcessed = true;
-                        
-                        try {
-                            // 清理输出：移除 ANSI 控制字符、分页符和多余的提示符
-                            let cleanOutput = output
-                                .replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '') // 移除 ANSI 颜色代码
-                                .replace(/\r/g, '') // 移除回车符
-                                .replace(/\x08/g, '') // 移除退格符
-                                .replace(/---- More ----/g, '') // 移除华为/华三分页符
-                                .replace(/-- More --/g, '') // 移除华三分页符
-                                .replace(/--More--/g, '') // 移除思科分页符
-                                .replace(/\[\d+D/g, '') // 移除 ANSI 光标控制
-                                .replace(/\s+$/gm, ''); // 移除行尾空格
-                            
-                            // 提取配置内容：从命令后开始到最后一个提示符之前
-                            const lines = cleanOutput.split('\n').filter(line => line.trim() !== '');
-                            let configStartIndex = -1;
-                            let configEndIndex = lines.length;
-                            
-                            // 找到命令执行的开始位置
-                            for (let i = 0; i < lines.length; i++) {
-                                if (lines[i].includes(command)) {
-                                    configStartIndex = i + 1;
-                                    break;
-                                }
-                            }
-                            
-                            // 找到配置结束位置（下一个提示符）
-                            if (configStartIndex !== -1) {
-                                for (let i = configStartIndex; i < lines.length; i++) {
-                                    const line = lines[i].trim();
-                                    // 检测常见的设备提示符
-                                    if (line.match(/^[<\[].*[>\]]$/) || 
-                                        line.match(/^\S+#\s*$/) || 
-                                        line.match(/^\S+>\s*$/) ||
-                                        line === 'quit' ||
-                                        line === 'return' ||
-                                    line.startsWith('Error:') ||
-                                        line.startsWith('%')) {
-                                        configEndIndex = i;
-                                        break;
-                                    }
-                                }
-                                
-                                cleanOutput = lines.slice(configStartIndex, configEndIndex).join('\n').trim();
-                            }
-                            
-                            // 如果没有提取到内容，使用原始输出
-                            if (cleanOutput.length < 100) {
-                                cleanOutput = output;
-                            }
-
-                            // Save backup file
-                            const backupDir = path.join(__dirname, 'backups', name);
-                            await fs.mkdir(backupDir, { recursive: true });
-                            
-                            // 格式化时间戳：中国上海时区 (UTC+8) YYYY-MM-DD_HH-mm-ss
-                            const now = new Date();
-                            const chinaTime = new Date(now.getTime() + (8 * 60 * 60 * 1000));
-                            const timestamp = chinaTime.toISOString()
-                                .replace(/T/, '_')
-                                .replace(/\..+/, '')
-                                .replace(/:/g, '-');
-                            
-                            // 文件名格式：设备名称_时间.cfg
-                            const filename = `${name}_${timestamp}.cfg`;
-                            const filepath = path.join(backupDir, filename);
-                            
-                            await fs.writeFile(filepath, cleanOutput, 'utf8');
-                            
-                            const backup = {
-                                id: crypto.randomUUID(),
-                                deviceId: id,
-                                deviceName: name,
-                                timestamp: new Date().toISOString(),
-                                filename,
-                                filepath,
-                                size: cleanOutput.length
-                            };
-                            
-                            res.json({ success: true, backup });
-                            resolve();
-                        } catch (err: any) {
-                            reject(err);
-                        }
-                    };
-
-                    stream.on('data', (data: Buffer) => {
-                        const chunk = data.toString();
-                        output += chunk;
-                        
-                        // 检测分页符并自动翻页
-                        if (commandSent) {
-                            // 华为/华三设备的分页符：---- More ----
-                            if (chunk.includes('---- More ----')) {
-                                stream.write(' ');
-                                resetDataTimeout();
-                                return;
-                            }
-                            
-                            // 华三设备的另一种分页符：-- More --
-                            if (chunk.includes('-- More --')) {
-                                stream.write(' ');
-                                resetDataTimeout();
-                                return;
-                            }
-                            
-                            // 思科设备的分页符：--More--
-                            if (chunk.includes('--More--')) {
-                                stream.write(' ');
-                                resetDataTimeout();
-                                return;
-                            }
-                            
-                            // 检测到 lines 关键字（某些设备显示 "--More-- lines 1-24"）
-                            if (chunk.match(/--\s*More\s*--.*lines/i)) {
-                                stream.write(' ');
-                                resetDataTimeout();
-                                return;
-                            }
-                            
-                            // 检测 ANSI 控制符（分页清除后留下的）
-                            if (chunk.match(/\x1b\[\d+D/) || chunk.match(/\[\d+D/)) {
-                                resetDataTimeout();
-                                return;
-                            }
-                            
-                            // 命令发送后，重置超时计时器
-                            resetDataTimeout();
-                        }
-                        
-                        // 等待设备准备好（出现提示符），然后发送命令
-                        if (!commandSent && (chunk.includes('>') || chunk.includes('#') || chunk.includes(']'))) {
-                            // 等待一小段时间确保设备就绪
-                            setTimeout(() => {
-                                stream.write(command + '\n');
-                                commandSent = true;
-                                resetDataTimeout();
-                            }, 500);
-                        }
-                    }).on('close', () => {
-                        if (dataTimeout) clearTimeout(dataTimeout);
-                        conn.end();
-                        if (!res.headersSent && !outputProcessed) {
-                            processOutput();
-                        }
-                    });
-                    
-                    stream.stderr.on('data', (data: Buffer) => {
-                        // 记录错误但不阻断
-                        console.error('stderr:', data.toString());
-                    });
-                });
-            }).on('error', (err) => {
-                clearTimeout(timeout);
-                reject(err);
-            }).connect({
-                host: ip,
-                port: parseInt(port),
-                username,
-                password,
-                readyTimeout: 20000,
-                algorithms: {
-                    kex: [
-                        'diffie-hellman-group1-sha1',
-                        'diffie-hellman-group14-sha1',
-                        'diffie-hellman-group-exchange-sha1',
-                        'diffie-hellman-group-exchange-sha256',
-                        'ecdh-sha2-nistp256',
-                        'ecdh-sha2-nistp384',
-                        'ecdh-sha2-nistp521'
-                    ],
-                    cipher: [
-                        'aes128-ctr',
-                        'aes192-ctr',
-                        'aes256-ctr',
-                        'aes128-gcm',
-                        'aes256-gcm',
-                        'aes128-cbc',
-                        'aes192-cbc',
-                        'aes256-cbc',
-                        '3des-cbc'
-                    ],
-                    hmac: [
-                        'hmac-sha2-256',
-                        'hmac-sha2-512',
-                        'hmac-sha1',
-                        'hmac-sha1-96'
-                    ],
-                    serverHostKey: [
-                        'ssh-rsa',
-                        'ssh-dss',
-                        'ecdsa-sha2-nistp256',
-                        'ecdsa-sha2-nistp384',
-                        'ecdsa-sha2-nistp521',
-                        'ssh-ed25519'
-                    ]
-                }
-            } as ConnectConfig);
-        });
+        const result = await performBackupForDevice(id, name, ip, parseInt(port), username, password, vendor);
+        if (result.success) {
+            res.json({ success: true, backup: result.backup });
+        } else {
+            res.status(500).json({ success: false, error: result.error });
+        }
     } catch (error: any) {
         res.status(500).json({ success: false, error: error.message });
     }
 });
 
-// Get backup history for a device
 app.get('/api/device/:deviceName/backups', async (req: Request, res: Response) => {
     try {
         const { deviceName } = req.params;
@@ -1447,7 +1353,6 @@ app.get('/api/device/:deviceName/backups', async (req: Request, res: Response) =
     }
 });
 
-// Get backup content
 app.get('/api/backup/content', async (req: Request, res: Response) => {
     try {
         const { filepath } = req.query;
@@ -1462,7 +1367,6 @@ app.get('/api/backup/content', async (req: Request, res: Response) => {
     }
 });
 
-// Get backup content (alias)
 app.get('/api/backups/content', async (req: Request, res: Response) => {
     try {
         const { filepath } = req.query;
@@ -1477,7 +1381,6 @@ app.get('/api/backups/content', async (req: Request, res: Response) => {
     }
 });
 
-// Delete backup
 app.delete('/api/backup', async (req: Request, res: Response) => {
     try {
         const { filepath } = req.body;
@@ -1492,7 +1395,6 @@ app.delete('/api/backup', async (req: Request, res: Response) => {
     }
 });
 
-// Compare backups (diff)
 app.post('/api/diff/backups', async (req: Request, res: Response) => {
     try {
         const { oldFilepath, newFilepath } = req.body;
@@ -1538,7 +1440,6 @@ app.post('/api/diff/backups', async (req: Request, res: Response) => {
     }
 });
 
-// Create scheduled backup task
 app.post('/api/scheduler/task', (req: Request, res: Response) => {
     try {
         const { cronExpression, devices } = req.body;
@@ -1560,14 +1461,12 @@ app.post('/api/scheduler/task', (req: Request, res: Response) => {
         const taskId = crypto.randomUUID();
 
         const task = cron.schedule(cronExpression, async () => {
-            console.log(`[${new Date().toISOString()}] 执行定时任务1: ${taskId}`);
+            console.log(`[${new Date().toISOString()}] 执行定时备份任务: ${taskId}`);
             
-            // 並联执行所有设备的备份
             const backupResults: any[] = [];
             
             for (const device of devices) {
                 try {
-                    // 检查设备是否有必要的信息
                     if (!device.management?.ipAddress || !device.management?.credentials?.username || !device.management?.credentials?.password) {
                         console.warn(`[警告] 设备 ${device.name} 信息不完整，跳过备份`);
                         backupResults.push({
@@ -1612,13 +1511,11 @@ app.post('/api/scheduler/task', (req: Request, res: Response) => {
                     });
                 }
                 
-                // 延迟 100ms 以便不同设备之间的连接冲突
                 await new Promise(resolve => setTimeout(resolve, 100));
             }
             
             console.log(`[完成] 定时任务 ${taskId} 执行完成。成功: ${backupResults.filter(r => r.success).length}/${backupResults.length}`);
             
-            // 可选: 技查结果发送给所有连接的 WebSocket 客户端
             broadcast({
                 type: 'scheduled-backup-complete',
                 taskId,
@@ -1641,7 +1538,6 @@ app.post('/api/scheduler/task', (req: Request, res: Response) => {
     }
 });
 
-// Remove scheduled task
 app.delete('/api/scheduler/task/:taskId', (req: Request, res: Response) => {
     try {
         const { taskId } = req.params;
@@ -1650,7 +1546,7 @@ app.delete('/api/scheduler/task/:taskId', (req: Request, res: Response) => {
         if (taskData) {
             taskData.task.stop();
             scheduledTasks.delete(taskId);
-            console.log(`[删除] 定时任务 ${taskId} 已删除`);
+            console.log(`[删除] 定时备份任务 ${taskId} 已删除`);
             res.json({ success: true, message: 'Task removed successfully' });
         } else {
             res.status(404).json({ success: false, error: 'Task not found' });
@@ -1660,15 +1556,13 @@ app.delete('/api/scheduler/task/:taskId', (req: Request, res: Response) => {
     }
 });
 
-// List scheduled tasks
 app.get('/api/scheduler/tasks', (req: Request, res: Response) => {
     try {
         const tasks = Array.from(scheduledTasks.entries()).map(([id, data]) => ({
             id,
             cronExpression: data.cronExpression,
             deviceCount: data.devices.length,
-            devices: data.devices.map(d => ({ id: d.id, name: d.name })),
-            status: data.task.status // Returns 'started' or 'stopped'
+            devices: data.devices.map(d => ({ id: d.id, name: d.name }))
         }));
         res.json({ success: true, tasks });
     } catch (error: any) {
@@ -1676,6 +1570,194 @@ app.get('/api/scheduler/tasks', (req: Request, res: Response) => {
     }
 });
 
+app.post('/api/scheduler/inspection-task', (req: Request, res: Response) => {
+    try {
+        const { cronExpression, devices, templates } = req.body;
+
+        if (!cronExpression || !devices || !Array.isArray(devices)) {
+            return res.status(400).json({ 
+                success: false, 
+                error: 'cronExpression and devices array are required' 
+            });
+        }
+
+        if (!templates || !Array.isArray(templates) || templates.length === 0) {
+            return res.status(400).json({
+                success: false,
+                error: 'At least one template is required'
+            });
+        }
+
+        if (!cron.validate(cronExpression)) {
+            return res.status(400).json({
+                success: false,
+                error: 'Invalid cron expression'
+            });
+        }
+
+        const taskId = crypto.randomUUID();
+
+        const task = cron.schedule(cronExpression, async () => {
+            console.log(`[${new Date().toISOString()}] 执行定时巡检任务: ${taskId}`);
+            
+            const inspectionResults: any[] = [];
+            
+            for (const device of devices) {
+                try {
+                    if (!device.credentials?.username || !device.credentials?.password) {
+                        console.warn(`[警告] 设备 ${device.name} 缺少凭证，跳过巡检`);
+                        inspectionResults.push({
+                            deviceId: device.id,
+                            deviceName: device.name,
+                            success: false,
+                            error: '设备缺少SSH凭证'
+                        });
+                        continue;
+                    }
+                    
+                    console.log(`[开始] 执行设备 ${device.name} (${device.ip}) 的巡检`);
+                    
+                    const result = await performInspectionForDevice(
+                        device.id,
+                        device.name,
+                        device.ip,
+                        device.credentials?.port || 22,
+                        device.credentials?.username,
+                        device.credentials?.password,
+                        device.vendor,
+                        templates
+                    );
+                    
+                    inspectionResults.push({
+                        deviceId: device.id,
+                        deviceName: device.name,
+                        ...result
+                    });
+                    
+                    if (result.success) {
+                        console.log(`[成功] 设备 ${device.name} 巡检完成`);
+                        
+                        const historyEntry = {
+                            taskId,
+                            timestamp: new Date().toLocaleString(),
+                            status: 'success',
+                            log: result.results,
+                            scheduled: true
+                        };
+                        
+                        if (!inspectionHistory.has(device.id)) {
+                            inspectionHistory.set(device.id, []);
+                        }
+                        inspectionHistory.get(device.id)!.unshift(historyEntry);
+                        if (inspectionHistory.get(device.id)!.length > 20) {
+                            inspectionHistory.get(device.id)!.pop();
+                        }
+                        
+                        broadcast({
+                            deviceId: device.id,
+                            taskId,
+                            progress: 100,
+                            status: 'success',
+                            log: result.results,
+                            lastInspected: new Date().toLocaleString(),
+                            scheduled: true
+                        });
+                    } else {
+                        console.error(`[失败] 设备 ${device.name} 巡检失败: ${result.error}`);
+                        
+                        const historyEntry = {
+                            taskId,
+                            timestamp: new Date().toLocaleString(),
+                            status: 'failed',
+                            log: { error: { 'Inspection Failed': result.error } },
+                            error: result.error,
+                            scheduled: true
+                        };
+                        
+                        if (!inspectionHistory.has(device.id)) {
+                            inspectionHistory.set(device.id, []);
+                        }
+                        inspectionHistory.get(device.id)!.unshift(historyEntry);
+                        
+                        broadcast({
+                            deviceId: device.id,
+                            taskId,
+                            progress: 100,
+                            status: 'failed',
+                            log: { error: { 'Inspection Failed': result.error } },
+                            lastInspected: new Date().toLocaleString(),
+                            scheduled: true
+                        });
+                    }
+                } catch (error: any) {
+                    console.error(`[错误] 设备 ${device.name} 巡检发生异常: ${error.message}`);
+                    inspectionResults.push({
+                        deviceId: device.id,
+                        deviceName: device.name,
+                        success: false,
+                        error: error.message
+                    });
+                }
+                
+                await new Promise(resolve => setTimeout(resolve, 200));
+            }
+            
+            console.log(`[完成] 定时巡检任务 ${taskId} 执行完成。成功: ${inspectionResults.filter(r => r.success).length}/${inspectionResults.length}`);
+            
+            broadcast({
+                type: 'scheduled-inspection-complete',
+                taskId,
+                timestamp: new Date().toISOString(),
+                totalDevices: devices.length,
+                successCount: inspectionResults.filter(r => r.success).length,
+                results: inspectionResults
+            });
+        });
+
+        scheduledInspectionTasks.set(taskId, { task, devices, templates, cronExpression });
+
+        res.json({ 
+            success: true, 
+            taskId,
+            message: 'Scheduled inspection task created successfully' 
+        });
+    } catch (error: any) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+app.delete('/api/scheduler/inspection-task/:taskId', (req: Request, res: Response) => {
+    try {
+        const { taskId } = req.params;
+
+        const taskData = scheduledInspectionTasks.get(taskId);
+        if (taskData) {
+            taskData.task.stop();
+            scheduledInspectionTasks.delete(taskId);
+            console.log(`[删除] 定时巡检任务 ${taskId} 已删除`);
+            res.json({ success: true, message: 'Inspection task removed successfully' });
+        } else {
+            res.status(404).json({ success: false, error: 'Task not found' });
+        }
+    } catch (error: any) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+app.get('/api/scheduler/inspection-tasks', (req: Request, res: Response) => {
+    try {
+        const tasks = Array.from(scheduledInspectionTasks.entries()).map(([id, data]) => ({
+            id,
+            cronExpression: data.cronExpression,
+            deviceCount: data.devices.length,
+            devices: data.devices.map(d => d.name),  // 返回设备名称数组
+            templates: data.templates.map(t => t.id || `${t.vendor}-${t.name}`)  // 返回模板 ID 数组
+        }));
+        res.json({ success: true, tasks });
+    } catch (error: any) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
 
 server.listen(PORT, () => {
     console.log(`API and WebSocket server running on port ${PORT}`);
