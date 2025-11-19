@@ -21,7 +21,8 @@ const EnhancedDeviceManagement: React.FC<EnhancedDeviceManagementProps> = ({ dev
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [editingDevice, setEditingDevice] = useState<ManagedDevice | null>(null);
     const [selectedDeviceIds, setSelectedDeviceIds] = useState<Set<string>>(new Set());
-    const [isBackingUp, setIsBackingUp] = useState(false);
+    // 批量删除状态
+    const [isDeleting, setIsDeleting] = useState(false);
     const [selectedGroup, setSelectedGroup] = useState<string>('all');
     const [showImportModal, setShowImportModal] = useState(false);
     const [message, setMessage] = useState<Message | null>(null);
@@ -97,44 +98,23 @@ const EnhancedDeviceManagement: React.FC<EnhancedDeviceManagementProps> = ({ dev
         }
     };
 
-    const handleBatchBackup = async () => {
+    // 批量删除选中的设备
+    const handleBatchDelete = () => {
         if (selectedDeviceIds.size === 0) {
             showMessage('error', '请至少选择一个设备');
             return;
         }
 
-        setIsBackingUp(true);
-        const selectedDevices = devices.filter(d => selectedDeviceIds.has(d.id));
-        let successCount = 0;
-        let failCount = 0;
-
-        showMessage('info', `正在备份 ${selectedDevices.length} 个设备...`);
-
-        for (const device of selectedDevices) {
-            try {
-            await axios.post(`${API_BASE_URL}/device/backup`, {
-                    name: device.name,
-                    ip: device.management.ipAddress,
-                    port: device.management.credentials?.port || 22,
-                    vendor: device.vendor,
-                    username: device.management.credentials?.username,
-                    password: device.management.credentials?.password,
-                });
-                successCount++;
-            } catch (error: any) {
-                console.error(`${device.name} 备份失败:`, error);
-                failCount++;
-            }
+        if (!window.confirm(`确认删除选中的 ${selectedDeviceIds.size} 个设备？`)) {
+            return;
         }
 
-        setIsBackingUp(false);
+        setIsDeleting(true);
+        const remainingDevices = devices.filter(d => !selectedDeviceIds.has(d.id));
+        onUpdate(remainingDevices);
         setSelectedDeviceIds(new Set());
-        
-        if (failCount === 0) {
-            showMessage('success', `批量备份完成！成功 ${successCount} 个`);
-        } else {
-            showMessage('error', `备份完成：成功 ${successCount} 个，失败 ${failCount} 个`);
-        }
+        setIsDeleting(false);
+        showMessage('success', '批量删除成功');
     };
 
     const toggleDeviceSelection = (deviceId: string) => {
@@ -277,15 +257,15 @@ const EnhancedDeviceManagement: React.FC<EnhancedDeviceManagementProps> = ({ dev
                 <h2 className="text-2xl font-bold text-white">设备信息管理</h2>
                 <div className="flex gap-3 flex-wrap">
                     <button
-                        onClick={handleBatchBackup}
-                        disabled={selectedDeviceIds.size === 0 || isBackingUp}
+                        onClick={handleBatchDelete}
+                        disabled={selectedDeviceIds.size === 0 || isDeleting}
                         className={`px-4 py-2 rounded-md transition-colors ${
-                            selectedDeviceIds.size === 0 || isBackingUp
+                            selectedDeviceIds.size === 0 || isDeleting
                                 ? 'bg-slate-600 text-slate-400 cursor-not-allowed'
-                                : 'bg-green-600 hover:bg-green-700 text-white'
+                                : 'bg-red-600 hover:bg-red-700 text-white'
                         }`}
                     >
-                        {isBackingUp ? '备份中...' : `一键备份 (${selectedDeviceIds.size})`}
+                        {isDeleting ? '删除中...' : `批量删除 (${selectedDeviceIds.size})`}
                     </button>
                     <button
                         onClick={downloadTemplate}
