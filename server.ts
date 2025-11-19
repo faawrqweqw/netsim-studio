@@ -275,6 +275,8 @@ async function performBackupForDevice(
                         'hmac-sha1-96'
                     ],
                     serverHostKey: [
+                        'rsa-sha2-512',
+                        'rsa-sha2-256',
                         'ssh-rsa',
                         'ssh-dss',
                         'ecdsa-sha2-nistp256',
@@ -480,6 +482,8 @@ async function performInspectionForDevice(
                         'hmac-sha1-96'
                     ],
                     serverHostKey: [
+                        'rsa-sha2-512',
+                        'rsa-sha2-256',
                         'ssh-rsa',
                         'ssh-dss',
                         'ecdsa-sha2-nistp256',
@@ -795,6 +799,8 @@ app.post('/api/inspect', (req: Request, res: Response) => {
                                 'hmac-sha1-96'
                             ],
                             serverHostKey: [
+                                'rsa-sha2-512',
+                                'rsa-sha2-256',
                                 'ssh-rsa',
                                 'ssh-dss',
                                 'ecdsa-sha2-nistp256',
@@ -1152,6 +1158,8 @@ app.post('/api/ssh/connect', (req: Request, res: Response) => {
                         'hmac-sha1-96'
                     ],
                     serverHostKey: [
+                        'rsa-sha2-512',
+                        'rsa-sha2-256',
                         'ssh-rsa',
                         'ssh-dss',
                         'ecdsa-sha2-nistp256',
@@ -1288,6 +1296,8 @@ app.post('/api/device/test', async (req: Request, res: Response) => {
                 'hmac-sha1-96'
             ],
             serverHostKey: [
+                'rsa-sha2-512',
+                'rsa-sha2-256',
                 'ssh-rsa',
                 'ssh-dss',
                 'ecdsa-sha2-nistp256',
